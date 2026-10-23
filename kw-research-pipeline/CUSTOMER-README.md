@@ -1,4 +1,4 @@
-# KW Research Pipeline — Setup
+# KW Research Pipeline — Setup (v7.1)
 
 A Claude skill that runs a full 9-step SEO keyword-research pipeline and hands
 you a prioritised content plan, backed by live Mangools data.
@@ -22,6 +22,9 @@ you a prioritised content plan, backed by live Mangools data.
    - On a **Pro or Max** plan: open **Settings → Capabilities**, turn on code
      execution and network egress, and add `api.mangools.com` to the
      additional allowed domains.
+   - On the **Free** plan you can't add allowed domains, so the script can't
+     reach Mangools. Use a paid Claude plan, or connect the Mangools connector
+     (see https://mangools.com/mcp) and Claude gets the data through it.
    - On a **Team or Enterprise** plan: an Owner opens **Organization settings
      → Capabilities**, allows network egress to package managers and specific
      domains, and adds `api.mangools.com`.

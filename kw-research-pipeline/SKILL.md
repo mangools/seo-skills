@@ -1,9 +1,9 @@
 ---
 name: "kw-research-pipeline"
-description: Run a complete 9-step SEO keyword-research pipeline for a seed keyword and domain — seed metrics, real organic competitors, long-tail discovery, competitor gap analysis, People-Also-Ask questions, topic + page-type clustering, traffic estimates, and a prioritised list of pages to create. Pulls live data from the Mangools API (KWFinder + SERPChecker) using the user's own Mangools key. Use this whenever the user wants keyword research, an SEO content plan, competitor keyword gaps, a topic/content map, "what pages should I build to rank for X", or mentions Mangools/KWFinder — even if they don't say "pipeline". Requires the Code Execution tool and a Mangools API key.
+description: Run a complete 9-step SEO keyword-research pipeline for a seed keyword and domain — seed metrics, real organic competitors, long-tail discovery, competitor gap analysis, People-Also-Ask questions, topic + page-type clustering, traffic estimates, and a prioritised list of pages to create. Pulls live data from the Mangools API (KWFinder + SERPChecker) using the user's own Mangools key. Use this whenever the user wants keyword research, an SEO content plan, competitor keyword gaps, a topic/content map, "what pages should I build to rank for X", or mentions Mangools/KWFinder — even if they don't say "pipeline". Requires the Code Execution tool and a Mangools API key. Version 7.1.
 ---
 
-# KW Research Pipeline
+# KW Research Pipeline (v7.1)
 
 Turn one **seed keyword** + one **domain** into a prioritised SEO content plan,
 backed by live Mangools data. You (Claude) orchestrate nine steps: some pull
@@ -412,3 +412,11 @@ Code session. Stop and tell the user:
 > plan, an Owner adds it under Organization settings → Capabilities. In a
 > Claude Code cloud session, set the environment's Network access to Custom
 > and add api.mangools.com under Allowed domains. Then start a new chat.
+> On the Free Claude plan you can't add allowed domains, so the script can't
+> run there: use a paid Claude plan, or connect the Mangools connector
+> (mangools.com/mcp) and I'll get the data through it.
+
+If Mangools connector (MCP) tools are already available in this chat, say
+that the script is blocked and ask whether to continue through the connector
+instead. If the user agrees, run the same steps with the matching connector
+tools and say which data the connector did not return.
