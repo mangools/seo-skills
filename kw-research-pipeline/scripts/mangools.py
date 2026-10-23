@@ -32,21 +32,26 @@ Commands
   locations  Look up Mangools/Google location IDs by name (free lookup)
              python mangools.py locations --query "Boston" --country us
   import-keywords  Volume, KD and CPC for a list of keywords (KWFinder keyword
-             import; 2 keyword lookups per call of up to 100 keywords). Used in
-             Step 5 to check every People-Also-Ask question at once.
-             python mangools.py import-keywords --file data/questions.txt --location 2840 --language 1000
+             import; 2 keyword lookups per call of up to 100 keywords, 1 on the
+             welcome bonus). Used in Step 5 to check every People-Also-Ask
+             question at once.
+             python mangools.py import-keywords --file data/<run>/questions.txt --location 2840 --language 1000
   domain-keywords  Keywords a domain ranks for (KWFinder suggested keywords,
-             mostly positions 40-100; 2 keyword lookups). `show` prints the
-             recurring terms, a hint at the site's field for the client profile.
+             mostly positions 40-100; 2 keyword lookups, 1 on the welcome
+             bonus). `show` prints the recurring terms, a hint at the site's
+             field for the client profile.
              python mangools.py domain-keywords --url mangools.com --location 2840
   show       Print a compact summary of any saved output file (for SERP files
              also the People-Also-Ask questions as "PAA (country):" /
              "PAA (city):" lines), or
              "call failed: ..." (exit 1) if the file holds an error, is empty,
              is not JSON, or was cut off. Detects the file type itself.
-             python mangools.py show data/related-<slug>.json [--rows 40]
+             python mangools.py show data/<run>/related-<slug>.json [--rows 40]
+  slug       Print the file-name slug of a keyword (no API call): lowercase,
+             accent marks removed, letters of every script kept.
+             python mangools.py slug --kw "Gartenmöbel Lounge"
 
-All commands print JSON to stdout. On error they print
+All commands except show and slug print JSON to stdout. On error they print
 {"error": "..."} to stdout and exit with a non-zero code.
 
 Location IDs:  us=2840  gb=2826  au=2036  ca=2124  de=2276  fr=2250
@@ -55,13 +60,20 @@ Language IDs:  en=1000  de=1001  fr=1002  es=1003  cs=1021  pl=1030  sk=1033
 """
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import sys
+import unicodedata
 import urllib.parse
 import urllib.request
 
 BASE = "https://api.mangools.com/v3"
+
+
+class _ApiError(Exception):
+    """A Mangools call that failed for good; main() prints it as {"error": ...}."""
 
 
 def _key(args):
@@ -113,7 +125,7 @@ def _request(method, path, key, query=None, body=None):
     if query:
         url += "?" + urllib.parse.urlencode(query)
     data = json.dumps(body).encode() if body is not None else None
-    headers = {"x-access-token": key, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (compatible; kw-research-pipeline/1.0)"}
+    headers = {"x-access-token": key, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (compatible; kw-research-pipeline/7.2)"}
 
     last_msg = "unknown error"
     # Mangools intermittently serves an anti-bot "Unathorized access" HTML page
@@ -146,7 +158,7 @@ def _request(method, path, key, query=None, body=None):
             continue
 
         # Retry rate limits (429 RateLimit: "Too many requests in short period").
-        # A 429 CreditLimit means the daily quota is used up: fail fast instead.
+        # A 429 CreditLimit means the daily quota or the welcome bonus is used up: fail fast instead.
         if status == 429 and attempt < 5 and _error_type(text) != "CreditLimit":
             last_msg = f"Mangools 429: {text[:200]}"
             wait = min(_retry_after(text, retry_hdr) or 10, 60)
@@ -170,20 +182,24 @@ def _request(method, path, key, query=None, body=None):
                 parts = [e.get("type"), e.get("message") or j.get("message") or j.get("detail")]
                 if isinstance(e.get("errors"), list):
                     parts.append(", ".join(str(x) for x in e["errors"]))
+                if e.get("permanent_credits_used_up") or j.get("permanent_credits_used_up"):
+                    unit = "SERP units" if path.startswith("/serpchecker/") else "keyword lookups"
+                    parts.append(f"welcome bonus used up for {unit}; daily limits now apply at the paid rate"
+                                 " (2 per request, 4 per serp-dual, 10 per gap page)")
                 if e.get("reset"):
                     parts.append(f"quota resets in {e['reset']} s")
                 detail = ": ".join(str(p) for p in parts if p)
                 msg += ": " + (detail or (j.get("error") if isinstance(j.get("error"), str) else "") or json.dumps(j)[:300])
             except Exception:
                 msg += ": " + (text[:300] or "non-JSON response")
-            _die(msg, 3)
+            raise _ApiError(msg)
 
         try:
             return json.loads(text)
         except Exception:
-            _die(f"Could not parse Mangools response: {text[:300]}", 3)
+            raise _ApiError(f"Could not parse Mangools response: {text[:300]}")
 
-    _die(f"Gave up after retries: {last_msg}", 3)
+    raise _ApiError(f"Gave up after retries: {last_msg}")
 
 
 def cmd_related(args):
@@ -390,6 +406,15 @@ def cmd_show(args):
     except Exception:
         _show_fail(stripped[:300] + (" ... (not valid JSON; cut off or not a Mangools response)" if stripped[:1] in "{[" else " (not JSON)"))
     if isinstance(d, dict) and "error" in d:
+        kept = (d.get("country") or {}).get("serp") if isinstance(d.get("country"), dict) else None
+        if isinstance(kept, dict):  # serp-dual whose city half failed
+            print("call failed: " + " ".join(json.dumps({"error": d["error"]})[:300].split()))
+            print(f"country half kept in this file under country: kw {d.get('kw')} | KD {kept.get('rank')}")
+            _show_results("country", _organic_results(kept, n))
+            qs = _paa_questions(kept)
+            if qs:
+                print("PAA (country): " + " | ".join(qs))
+            sys.exit(1)
         _show_fail(json.dumps(d)[:300])
 
     if isinstance(d, list):  # locations
@@ -462,9 +487,32 @@ def cmd_show(args):
         r = d["resources"]
         rk, sp = r.get("related-keywords", {}), r.get("serps", {})
         print(f"plan {d.get('highestPlan')} | keyword lookups left {rk.get('remaining')} / {rk.get('limit')} | SERP units left {sp.get('remaining')} / {sp.get('limit')}")
-        bonus = {k: v for k, v in list(d.items()) + list(r.items()) if "credit" in k.lower() or "bonus" in k.lower()}
-        if bonus:
-            print("bonus credits:", json.dumps(bonus))
+        pc = d.get("permanent_credits", r.get("permanent_credits"))
+        unknown = False
+        if isinstance(pc, dict):  # Free/Free+ one-time API & MCP welcome bonus
+            units = [("keyword lookups", pc.get("related-keywords") or {}), ("SERP units", pc.get("serps") or {})]
+            left = [(name, u) for name, u in units if (u.get("remaining") or 0) > 0]
+            if left:
+                print("welcome bonus left: " + ", ".join(f"{u.get('remaining')} / {u.get('limit')} {name}" for name, u in left)
+                      + " (one-time; spent before the daily limits above, 1 per request, a gap page included)")
+            spent = [name for name, u in units if u.get("remaining") == 0]
+            if spent:
+                print(f"welcome bonus used up for {' and '.join(spent)}: those requests now use the daily limits above"
+                      " at the paid rate (2 per request, 4 per serp-dual, 10 per gap page)")
+        else:
+            other = {k: v for k, v in list(d.items()) + list(r.items()) if "credit" in k.lower() or "bonus" in k.lower()}
+            if other:
+                print("bonus credits:", json.dumps(other))
+            unknown = not rk.get("limit") and not sp.get("limit")
+            if unknown:
+                print("key not recognised: all limits are 0 (an empty or unknown key gets this answer)")
+        gm = d.get("kw-gap-max-competitors")
+        caps = [(gm, "gap takes up to {} competitor" + ("" if gm == 1 else "s") + " per call"),
+                (d.get("related-keywords-rows"), "up to {} related keywords per lookup"),
+                (d.get("competitor-keywords-rows"), "up to {} gap keywords per competitor")]
+        caps = [t.format(v) for v, t in caps if v is not None]
+        if caps and not unknown:
+            print(" | ".join(caps))
     elif "results" in d:  # gap
         res = d.get("results") or []
         print(f"{len(res)} competitors | isAllowedPagination {d.get('isAllowedPagination')} | resultsSize {d.get('resultsSize')}")
@@ -502,7 +550,7 @@ def _city_explainer(country_code, cities, kw=None, country_label=None):
         f"{country}, and once for one city. You'll see both side by side, so we can tell "
         f"whether your competition is the same everywhere or changes by location. That makes "
         f"the competitor list, and everything built on it, more reliable.\n\n"
-        f"The cost: each ranking check runs once more for the city (2 extra SERP units on your Mangools plan). We'll "
+        f"The cost: each ranking check runs once more for the city, so it uses twice the SERP units. We'll "
         f"keep the same city for the whole research, so I'll only ask this once.\n\n"
         f"Which city should we use?\n\n{options}\n\n"
         + ("" if not cities else
@@ -554,8 +602,15 @@ def cmd_serp_dual(args):
     country_serp = _request("GET", "/serpchecker/serps", key,
                             query={"kw": args.kw, "location_id": country_id})
     time.sleep(2)  # space the calls; back-to-back SERP requests get throttled
-    city_serp = _request("GET", "/serpchecker/serps", key,
-                         query={"kw": args.kw, "location_id": city["id"]})
+    try:
+        city_serp = _request("GET", "/serpchecker/serps", key,
+                             query={"kw": args.kw, "location_id": city["id"]})
+    except _ApiError as e:
+        # Keep the country SERP that was already paid for.
+        print(json.dumps({"error": f"{e} (city half; the country half succeeded and is kept in this file)",
+                          "kw": args.kw,
+                          "country": {"code": code, "location_id": int(country_id), "serp": country_serp}}))
+        sys.exit(3)
 
     c_res, y_res = _organic_results(country_serp), _organic_results(city_serp)
     c_doms, y_doms = [r["domain"] for r in c_res], [r["domain"] for r in y_res]
@@ -578,6 +633,23 @@ def cmd_serp_dual(args):
             "overlap_pct": round(100 * len(shared) / len(union), 1) if union else None,
         },
     }))
+
+
+def _slug(text):
+    """File-name slug: lowercase, letters, digits and marks of every language kept
+    as typed (NFC), any other run of characters one hyphen. A 6-character code is
+    added when punctuation was dropped or the keyword is long, so two different
+    keywords never share a file ("c++ tutorial" vs "c tutorial")."""
+    t = unicodedata.normalize("NFKC", text).strip().lower()
+    s = "".join(c if unicodedata.category(c)[0] in "LNM" else "-" for c in t)
+    s = re.sub(r"-+", "-", unicodedata.normalize("NFC", s)).strip("-")
+    if not s or s != re.sub(r"\s+", "-", t) or len(s) > 60:
+        s = (s[:60].rstrip("-") + "-" if s else "kw-") + hashlib.sha1(t.encode("utf-8")).hexdigest()[:6]
+    return s
+
+
+def cmd_slug(args):
+    print(_slug(args.kw))
 
 
 def _positive_int(v):
@@ -610,14 +682,14 @@ def main():
     s.add_argument("--location", type=int, default=2840, help="Google location ID (country or city)")
     s.set_defaults(func=cmd_serp)
 
-    ik = sub.add_parser("import-keywords", parents=[common], help="Volume/KD/CPC for a list of keywords (2 lookups per 100)")
+    ik = sub.add_parser("import-keywords", parents=[common], help="Volume/KD/CPC for a list of keywords (2 lookups per 100, 1 on the welcome bonus)")
     ik.add_argument("--file", required=True, help="Text file, one keyword per line")
     ik.add_argument("--location", type=int, default=2840, help="Google location ID (country)")
     ik.add_argument("--language", type=int, default=1000, help="Google Ads language ID")
     ik.add_argument("--chunk", type=_positive_int, default=100, help="Keywords per call (plan caps apply; default 100)")
     ik.set_defaults(func=cmd_import_keywords)
 
-    dk = sub.add_parser("domain-keywords", parents=[common], help="Keywords a domain already ranks for (2 lookups)")
+    dk = sub.add_parser("domain-keywords", parents=[common], help="Keywords a domain already ranks for (2 lookups, 1 on the welcome bonus)")
     dk.add_argument("--url", required=True, help="The domain, e.g. mangools.com")
     dk.add_argument("--location", type=int, default=2840, help="Google location ID (country)")
     dk.set_defaults(func=cmd_domain_keywords)
@@ -651,12 +723,26 @@ def main():
     lo.set_defaults(func=cmd_locations)
 
     sh = sub.add_parser("show", help="Summarise a saved output file (no API call)")
-    sh.add_argument("file", help="Path of a saved output file, e.g. data/related-<slug>.json")
+    sh.add_argument("file", help="Path of a saved output file, e.g. data/<run>/related-<slug>.json")
     sh.add_argument("--rows", type=_positive_int, default=40, help="Rows to print (default 40)")
     sh.set_defaults(func=cmd_show)
 
+    sl = sub.add_parser("slug", help="Print a keyword's file-name slug (no API call)")
+    sl.add_argument("--kw", required=True)
+    sl.set_defaults(func=cmd_slug)
+
+    # Keyword text is printed as UTF-8 everywhere (Windows pipes default to the ANSI code page).
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     args = p.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except _ApiError as e:
+        _die(str(e), 3)
 
 
 if __name__ == "__main__":

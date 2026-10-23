@@ -36,15 +36,15 @@ The script writes the API body as-is; there is no `data` wrapper.
 
 `locations` output: a list of `id`, `label`, `type` (`City`, `Country`, ...), `country` and `active`.
 
-Quota file (`data/limits.json`, the Step 0 curl response): `highestPlan` and `resources`, where `resources.related-keywords` and `resources.serps` each carry `remaining` and `limit`.
+Quota file (`<run>/limits.json`, the Step 0 curl response): `highestPlan` and `resources`, where `resources.related-keywords` and `resources.serps` each carry `remaining` and `limit` (the daily figures); `kw-gap-max-competitors` (competitors one `gap` call takes), `related-keywords-rows` and `competitor-keywords-rows` (rows per lookup); and, for Free and Free+ accounts, `permanent_credits`, the one-time API & MCP welcome bonus, whose `related-keywords` and `serps` each carry `limit` and `remaining`. Mangools spends the bonus before the daily limits, at 1 per request (a gap page included). `show` prints all of these in plain words.
 
-`import-keywords` output: `keywords[]` (keyword objects for the imported phrases, `sv` null when Mangools has no figure), `countKeywordsBeforeLimit`, `language`, `location` and `imported` (how many phrases were sent). `show` prints the rows and how many have volume. One call covers up to 100 phrases for 2 keyword lookups.
+`import-keywords` output: `keywords[]` (keyword objects for the imported phrases, `sv` null when Mangools has no figure), `countKeywordsBeforeLimit`, `language`, `location` and `imported` (how many phrases were sent). `show` prints the rows and how many have volume. One call covers up to 100 phrases for 2 keyword lookups (1 on the welcome bonus).
 
 `domain-keywords` output: `totalCount` (keywords the domain ranks for), `keywords[]` (each `kw`, `sv`, `position`, `lid`; up to 1000 rows, mostly positions 40–100), `countKeywordsBeforeLimit`, `url_type`, `__hasNextPage`. `show` prints the recurring terms and the highest-volume rows; use it as a hint about the site's field, not as a list of its best keywords.
 
 `gap` output: `isAllowedPagination` (false on plans that cannot paginate; see §5), `resultsSize`, and `results[]`, one per competitor, with `domain`, `totalCount` and `keywords[]` (keyword objects that also carry `position`).
 
-Any command that fails writes `{"error": "..."}` instead.
+Any command that fails writes `{"error": "..."}` instead; a `serp-dual` whose city half failed also keeps `kw` and the paid `country` half (`show` prints it).
 
 ---
 
@@ -86,8 +86,9 @@ client sees why they were dropped. If four or more of the national organic
 results (usually 9 of them) are off-topic, the seed is ambiguous: say so, name
 the off-topic domains, propose two or three narrower seeds, and ask whether to
 continue with them excluded or to switch seed; spend no quota on Steps 3–4
-until the client answers. The gap analysis takes the five
-strongest **direct** domains; publishers make weak gap baselines.
+until the client answers. The gap analysis takes the strongest **direct**
+domains, as many as one `gap` call takes (five on most plans); publishers
+make weak gap baselines.
 
 **Platforms (show, label, never gap):** Google, Apple and Microsoft properties
 (google.com including play.google.com, apple.com, microsoft.com) are not
@@ -128,10 +129,17 @@ From `related` results, keep a keyword when ALL hold:
 - `sv` ≥ min volume (default 10)
 - `seo` is null/undefined, OR `seo` ≤ max KD (default 60)
 
-Take up to 50. Run `serp-dual` on the top N, where N = min(25, floor(S / 8))
-and S is the `SERP units left` figure from Step 0 (a fresh SERP costs 2 units,
-a `serp-dual` makes two of them, so 4 units per keyword, and Step 3 may spend
-at most half of the Step 0 figure). A keyword is `validated` when a **direct**
+Take up to 50. Run `serp-dual` on the top N, where S is the SERP units the
+run can spend and Step 3 may spend at most half of S:
+- paid plans, and Free/Free+ once the SERP bonus is used up: S is the
+  `SERP units left` figure of the latest quota check (Step 0, or for a
+  Free/Free+ account its re-check before Step 3); a `serp-dual` costs 4
+  units, so N = min(25, floor(S / 8));
+- while that check shows SERP units left in the welcome bonus: S is that
+  bonus figure (not the daily one); a `serp-dual` costs 2 units, so
+  N = min(25, floor(S / 4)).
+
+A keyword is `validated` when a **direct**
 domain from the Step 2 merged set appears in the top 10 of either SERP,
 `content_competition` when only publishers, marketplaces or communities from
 the merged set appear, and `checked` when a SERP was fetched and none of them
@@ -245,7 +253,10 @@ page and do not count it among the 12. List those questions in the page's
 
 ## 9. Export formats (Step 7)
 
-Write real files to disk and hand them to the user.
+Write real files to disk and hand them to the user. Write both CSVs as UTF-8
+with a byte-order mark (Python: `open(path, "w", newline="",
+encoding="utf-8-sig")`), so Excel shows accented and non-Latin keywords
+correctly when the file is opened with a double-click.
 
 ### Keywords CSV (deduped by keyword)
 Columns:
@@ -282,5 +293,7 @@ separated by `;`; the JSON bundle carries them as `faq[]` per page.
 Quote fields containing commas and escape embedded quotes by doubling them.
 Name files `keywords-<slug>-<YYYY-MM-DD>.csv`,
 `page-recommendations-<slug>-<YYYY-MM-DD>.csv` and
-`research-<slug>-<YYYY-MM-DD>.json`, where `<slug>` follows the rule in
-SKILL.md (lowercase ASCII, accents removed, other characters as one hyphen).
+`research-<slug>-<YYYY-MM-DD>.json`, where `<slug>` is the seed's slug from
+the script's `slug` command (lowercase, letters of every language kept as
+typed, other characters as one hyphen, plus a 6-character code when
+punctuation was dropped).

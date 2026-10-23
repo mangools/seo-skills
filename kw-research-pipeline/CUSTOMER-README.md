@@ -1,4 +1,4 @@
-# KW Research Pipeline — Setup (v7.1)
+# KW Research Pipeline — Setup (v7.2)
 
 A Claude skill that runs a full 9-step SEO keyword-research pipeline and hands
 you a prioritised content plan, backed by live Mangools data.
@@ -11,8 +11,9 @@ you a prioritised content plan, backed by live Mangools data.
 2. **Your own Mangools API key.** Every lookup runs against *your* Mangools
    account and counts toward your plan's limits. Get your key at
    https://mangools.com/api-token
-   (On Basic and lower plans the gap analysis, Step 4, returns a small sample
-   per competitor; Premium and Agency return the full keyword set.)
+   (On Entry and Basic plans the gap analysis, Step 4, returns a small sample
+   per competitor. Premium and Agency, and Free and Free+ accounts while the
+   welcome bonus lasts, get a much longer list.)
 3. **Allow the Mangools API once, wherever Claude runs the script in a
    sandbox.** This is needed in Claude chat (claude.ai in the browser, or the
    Chat tab of the desktop and mobile apps), in Cowork, and in Claude Code
@@ -29,9 +30,11 @@ you a prioritised content plan, backed by live Mangools data.
      → Capabilities**, allows network egress to package managers and specific
      domains, and adds `api.mangools.com`.
    - In a **Claude Code cloud session**: open the session's cloud environment
-     from the environment selector, set **Network access** to **Custom** and
-     add `api.mangools.com` under **Allowed domains**. On Team and Enterprise,
-     a shared environment can only be changed by an Owner.
+     from the environment selector, set **Network access** to **Custom**, add
+     `api.mangools.com` under **Allowed domains** and tick **Also include
+     default list of common package managers** so your other sessions can
+     still install packages. On Team and Enterprise, a shared environment can
+     only be changed by an Owner.
 
    After adding the domain, **start a new chat** (or a new cloud session): the
    allowlist is applied when the chat's sandbox is created, so an open chat
@@ -39,9 +42,9 @@ you a prioritised content plan, backed by live Mangools data.
 
 ## Install the skill
 
-1. In Claude, go to **Settings → Customize → Skills**.
-2. Click **Add / Upload skill** and select the `kw-research-pipeline.skill`
-   file you downloaded.
+1. In Claude, open **Customize → Skills**.
+2. Click **+**, then **Create skill → Upload a skill**, and select the
+   `kw-research-pipeline.skill` file you downloaded.
 3. Make sure the skill's toggle is **on**.
 
 ## Save your key as a file
@@ -91,18 +94,23 @@ offers, then run only the steps it needs.
   Claude explains this and offers you 3 cities to choose from (or you can name your own), and that
   city is used for the rest of the run. Rankings often differ a lot between
   the two, so you see both.
-- **Costs:** Mangools counts two things, keyword lookups and SERP units. One
-  fresh keyword search (a `related` call) costs 2 keyword lookups on every
-  paid plan (Entry, Basic, Premium, Agency); Free and Free+ accounts spending
-  API/MCP welcome-bonus credits pay 1; repeating the same call within a day is
-  free. Every ranking check runs
-  twice, for the country and for a city, so it costs 4 SERP units per keyword.
-  Per run: 2 keyword lookups for the seed (plus 2 if Claude needs the optional
-  domain check to profile your site), 4 SERP units for the seed's ranking
-  check plus 4 per long-tail keyword checked (Claude checks at most 25, and
-  never more than half of the SERP units you had at the start), 10 lookups per gap-analysis
-  page, 2 lookups to check all People Also Ask questions at once and 2–4 to
-  discover related questions. On a fresh Basic day (110
-  lookups, 105 SERP units) a full run uses about 16–20 lookups and 56 SERP units.
-  Claude shows your remaining quota first and asks before each step that
-  spends it.
+- **Costs:** Mangools counts two things, keyword lookups and SERP units. On
+  paid plans (Entry, Basic, Premium, Agency) a fresh keyword search (a
+  `related` call) costs 2 keyword lookups, a ranking check 4 SERP units (it
+  runs twice, for the country and for a city) and a gap-analysis page 10
+  lookups. Free and Free+ accounts spend their one-time API & MCP welcome
+  bonus (100 keyword lookups and 100 SERP units) first, at 1 per request: a
+  keyword search 1, a ranking check 2, a gap page 1. Once the bonus is used
+  up, Free (5 lookups and 5 SERP units a day) and Free+ (10 and 10) pay the
+  paid-plan rates, which covers the first steps of a run (seed metrics and
+  competitors) but not a full one; Claude tells you and offers to stop there.
+  Repeating the same call within a day is free (the People Also Ask import
+  excepted). Per run: one keyword search for the seed (plus one if
+  Claude needs the optional domain check to profile your site), one ranking
+  check for the seed plus one per long-tail keyword checked (Claude checks at
+  most 25, and never more than half of the SERP units you have left),
+  one gap call per page (up to 3), one import to check all People Also Ask
+  questions at once and one or two keyword searches to discover related
+  questions. On a fresh Basic day (110 lookups, 105 SERP units) a full run
+  uses about 16–20 lookups and 56 SERP units. Claude shows your remaining
+  quota first and asks before each step that spends it.
