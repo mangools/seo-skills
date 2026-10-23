@@ -601,7 +601,8 @@ def cmd_serp_dual(args):
 
     country_serp = _request("GET", "/serpchecker/serps", key,
                             query={"kw": args.kw, "location_id": country_id})
-    time.sleep(2)  # space the calls; back-to-back SERP requests get throttled
+    # The API allows 3 requests per 30 s per pool and asks for 11 s between requests.
+    time.sleep(11)
     try:
         city_serp = _request("GET", "/serpchecker/serps", key,
                              query={"kw": args.kw, "location_id": city["id"]})

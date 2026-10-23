@@ -139,8 +139,11 @@ export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-up
   SERP) while the welcome bonus lasts (Step 0); say so when quoting quota for
   Steps 2–3. The seed costs one SERP in Step 1 and one in Step 2 when Step 2
   runs within 24 hours (identical calls repeat free for 24 hours; otherwise
-  two). The script spaces its two calls, retries rate limits and transient
-  errors itself and reports each wait on stderr.
+  two). Mangools allows 3 requests per 30 seconds per pool and asks for 11
+  seconds between them, so the script waits 11 s between its two calls and
+  the loops below wait 11 s between keywords (about 35 s per keyword); it
+  retries rate limits and transient errors itself and reports each wait on
+  stderr.
 - **`related` stays national**: volume and KD are national figures; only
   ranking data is dual.
 
@@ -347,7 +350,7 @@ run's `--city-id`, in batches of about 5 keywords per command (a longer batch
 can outlast a single command's time limit):
 
 ```bash
-export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<keyword 1>" "<keyword 2>" "<keyword 3>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py serp-dual --kw "$kw" --country <country> --city-id <id> --city-label "<label>" > "<run>/serp-$slug.json"; grep -q CreditLimit "<run>/serp-$slug.json" && break; sleep 5; done
+export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<keyword 1>" "<keyword 2>" "<keyword 3>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py serp-dual --kw "$kw" --country <country> --city-id <id> --city-label "<label>" > "<run>/serp-$slug.json"; grep -q CreditLimit "<run>/serp-$slug.json" && break; sleep 11; done
 ```
 
 `show` each file and record, per keyword, which merged-set domains appear in
@@ -397,7 +400,7 @@ keyword ranking", 720). Take them into the pool in a short Python script over
 the saved `<run>/paa-*.json` files.
 
 ```bash
-export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<general question 1>" "<general question 2>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py related --kw "$kw" --location <country-id> --language <language-id> > "<run>/paa-$slug.json"; grep -q CreditLimit "<run>/paa-$slug.json" && break; sleep 5; done
+export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<general question 1>" "<general question 2>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py related --kw "$kw" --location <country-id> --language <language-id> > "<run>/paa-$slug.json"; grep -q CreditLimit "<run>/paa-$slug.json" && break; sleep 11; done
 ```
 
 Sort by volume, then by how many SERPs showed the question. Questions with
