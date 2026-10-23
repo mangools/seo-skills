@@ -12,7 +12,7 @@ It works in Claude chat (claude.ai and the desktop and mobile apps), in Cowork a
 
 ## Quick start
 
-1. **Install the skill.** Download [`kw-research-pipeline.skill`](https://github.com/mangools/seo-skills/releases/latest/download/kw-research-pipeline.skill). In Claude, open **Customize → Skills**, click **+**, then **Create skill → Upload a skill**, and select the file. Using Claude Code on your computer? [Unzip it into `~/.claude/skills/` instead](#how-to-install-mangools-seo-skill).
+1. **Install the skill.** Download [`kw-research-pipeline.skill`](https://github.com/mangools/seo-skills/releases/latest/download/kw-research-pipeline.skill). In Claude, open **Settings → Customize → Skills**, click **+**, then **Create skill → Upload a skill**, and select the file. Using Claude Code on your computer? [Unzip it into `~/.claude/skills/` instead](#how-to-install-mangools-seo-skill).
 2. **Let Claude reach Mangools.** On a paid Claude plan, add `api.mangools.com` to the allowed domains ([how](#requirements-for-the-mangools-seo-skill)) and start a new chat. On the Free Claude plan, add the [Mangools connector](https://mangools.com/mcp) instead. When Claude says its script can't reach Mangools and asks whether to continue through the connector, say yes.
 3. **Run it.** Copy your API key from [mangools.com/api-token](https://mangools.com/api-token) into a plain text file named `mangools.env` with one line, `MANGOOLS_API_KEY=your-key-here`. Attach the file to a new chat and write: *Run keyword research for "your keyword" for yoursite.com.*
 
@@ -107,7 +107,7 @@ All you need is a seed keyword and your domain. Claude explains each step in pla
 ### 1. Claude chat and Cowork
 
 - Download [`kw-research-pipeline.skill`](https://github.com/mangools/seo-skills/releases/latest/download/kw-research-pipeline.skill) from the latest release.
-- In Claude, open **Customize → Skills**.
+- In Claude, open **Settings → Customize → Skills**.
 - Click **+**, then **Create skill → Upload a skill**, select the file and make sure the skill's toggle is on.
 
 Skills you upload in Claude also load in Cowork and in Claude Code cloud sessions.
@@ -337,3 +337,7 @@ Stuck, or found a bug? Contact Mangools support through the live chat on [mangoo
 [Mangools](https://mangools.com) is an easy and affordable SEO suite with tools for keyword research (KWFinder), SERP analysis (SERPChecker), rank tracking (SERPWatcher), backlink analysis (LinkMiner) and domain analysis (SiteProfiler). It also offers several [free SEO tools](https://mangools.com/free-seo-tools) that can simplify your everyday SEO tasks.
 
 Users who would like to use Mangools data in their own projects can also utilize the [Mangools SEO API](https://mangools.com/api), and anyone who'd rather ask Claude in plain language than learn an SEO tool can use the [Mangools MCP connector](https://mangools.com/mcp).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
