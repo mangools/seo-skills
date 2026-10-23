@@ -1,4 +1,4 @@
-# KW Research Pipeline — Setup (v7.2)
+# KW Research Pipeline — Setup (v7.3)
 
 A Claude skill that runs a full 9-step SEO keyword-research pipeline and hands
 you a prioritised content plan, backed by live Mangools data.

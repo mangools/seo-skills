@@ -1,9 +1,9 @@
 ---
 name: "kw-research-pipeline"
-description: Run a complete 9-step SEO keyword-research pipeline for a seed keyword and domain — seed metrics, real organic competitors, long-tail discovery, competitor gap analysis, People-Also-Ask questions, topic + page-type clustering, traffic estimates, and a prioritised list of pages to create. Pulls live data from the Mangools API (KWFinder + SERPChecker) using the user's own Mangools key. Use this whenever the user wants keyword research, an SEO content plan, competitor keyword gaps, a topic/content map, "what pages should I build to rank for X", or mentions Mangools/KWFinder — even if they don't say "pipeline". Requires the Code Execution tool and a Mangools API key. Version 7.2.
+description: Run a complete 9-step SEO keyword-research pipeline for a seed keyword and domain — seed metrics, real organic competitors, long-tail discovery, competitor gap analysis, People-Also-Ask questions, topic + page-type clustering, traffic estimates, and a prioritised list of pages to create. Pulls live data from the Mangools API (KWFinder + SERPChecker) using the user's own Mangools key. Use this whenever the user wants keyword research, an SEO content plan, competitor keyword gaps, a topic/content map, "what pages should I build to rank for X", or mentions Mangools/KWFinder — even if they don't say "pipeline". Requires the Code Execution tool and a Mangools API key. Version 7.3.
 ---
 
-# KW Research Pipeline (v7.2)
+# KW Research Pipeline (v7.3)
 
 Turn one **seed keyword** + one **domain** into a prioritised SEO content plan,
 backed by live Mangools data. You (Claude) orchestrate nine steps: some pull
@@ -140,10 +140,10 @@ export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-up
   Steps 2–3. The seed costs one SERP in Step 1 and one in Step 2 when Step 2
   runs within 24 hours (identical calls repeat free for 24 hours; otherwise
   two). Mangools allows 3 requests per 30 seconds per pool and asks for 11
-  seconds between them, so the script waits 11 s between its two calls and
-  the loops below wait 11 s between keywords (about 35 s per keyword); it
-  retries rate limits and transient errors itself and reports each wait on
-  stderr.
+  seconds between requests, so the script starts each SERP 11 s after the
+  previous one finished, also across commands: about 30–40 s per keyword.
+  It retries rate limits and transient errors itself and reports each retry
+  on stderr; the pacing waits are silent.
 - **`related` stays national**: volume and KD are national figures; only
   ranking data is dual.
 
@@ -341,16 +341,22 @@ From the Step 1 `related` file (no new call) keep the keywords that contain
 the seed, excluding the exact seed, with volume ≥ 10 and KD ≤ 60 or null (§4),
 in a short Python script, sorted by volume; take up to 50. If fewer than ~10
 remain (common with 3+ word seeds), say so and offer to widen to related
-keywords that pass the profile test (§2) with the same thresholds. Quote the cost (4 SERP
-units per keyword, 2 on the welcome bonus), confirm, then run `serp-dual` on
-the top N (§4: at most 25, and never more than half of the SERP units the
-latest quota check showed: the bonus figure while the SERP bonus lasts, the
-daily one after), reusing the
-run's `--city-id`, in batches of about 5 keywords per command (a longer batch
-can outlast a single command's time limit):
+keywords that pass the profile test (§2) with the same thresholds. Quote the
+cost (4 SERP units per keyword, 2 on the welcome bonus) and the time (about
+35 seconds per keyword, so N × 35 s), and say they can write at any time
+(you answer between batches); confirm, then run `serp-dual` on the
+top N (§4: at most 25, and never more than half of the SERP units the latest
+quota check showed: the bonus figure while the SERP bonus lasts, the daily
+one after), reusing the run's `--city-id`, **3 keywords per command** (about
+1.5 minutes). After each command, post one progress line, e.g. "Checked 9 of
+24 · about 9 min left", counting only `ok:` lines. If the user wrote anything
+meanwhile, answer it first; if it changes the plan (stop, fewer keywords,
+another city), follow it, otherwise run the next command without waiting for
+a reply. Run the commands one after another, never in parallel or in the
+background: the spacing holds only for one command at a time.
 
 ```bash
-export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<keyword 1>" "<keyword 2>" "<keyword 3>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py serp-dual --kw "$kw" --country <country> --city-id <id> --city-label "<label>" > "<run>/serp-$slug.json"; grep -q CreditLimit "<run>/serp-$slug.json" && break; sleep 11; done
+export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<keyword 1>" "<keyword 2>" "<keyword 3>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py serp-dual --kw "$kw" --country <country> --city-id <id> --city-label "<label>" > "<run>/serp-$slug.json"; if grep -q '"error"' "<run>/serp-$slug.json"; then echo "failed: $kw"; grep -q CreditLimit "<run>/serp-$slug.json" && { echo "quota used up: stop Step 3"; break; }; else echo "ok: $kw"; fi; done
 ```
 
 `show` each file and record, per keyword, which merged-set domains appear in
@@ -391,8 +397,9 @@ export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-up
 The header line (`N rows for M imported keywords | k with volume`) is what
 matters; the rows stay in the file. Exact question phrasings rarely have a
 volume figure (2 of 32 in testing); say so plainly. Then run `related` on the
-most general question of the pool, and on a second one only if
-the first brought fewer than ~5 question-form rows with volume: each response
+most general question of the pool, and run the command again for a second
+question only if the first brought fewer than ~5 question-form rows with
+volume: each response
 holds up to the plan's row cap (200 on Basic) of neighbouring phrases, and the
 question-form ones with volume are real question keywords nobody generated
 (in testing: "how to check keyword position on google", 1,000; "how to track
@@ -400,7 +407,7 @@ keyword ranking", 720). Take them into the pool in a short Python script over
 the saved `<run>/paa-*.json` files.
 
 ```bash
-export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<general question 1>" "<general question 2>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py related --kw "$kw" --location <country-id> --language <language-id> > "<run>/paa-$slug.json"; grep -q CreditLimit "<run>/paa-$slug.json" && break; sleep 11; done
+export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; for kw in "<general question>"; do slug=$(python3 <skill-folder>/scripts/mangools.py slug --kw "$kw"); python3 <skill-folder>/scripts/mangools.py related --kw "$kw" --location <country-id> --language <language-id> > "<run>/paa-$slug.json"; if grep -q CreditLimit "<run>/paa-$slug.json"; then echo "quota used up: stop Step 5"; break; fi; done
 ```
 
 Sort by volume, then by how many SERPs showed the question. Questions with
@@ -444,6 +451,10 @@ adjacent seed keywords to research next.
 - Ground every number in real Mangools data — never invent volumes or KD.
 - Keep intermediate output skimmable (tables/short summaries); save the heavy
   detail for the CSV/JSON exports.
+- Keep every command to about 1–2 minutes. The user's messages reach you
+  only between commands, so after each one in a long step say where you are
+  ("Checked 9 of 24 · about 9 min left"), answer any question the user asked
+  and follow any change of plan before you continue.
 - A `call failed:` message: show it plainly and continue with what you have
   rather than aborting the run. The script already retries rate limits (429)
   and server errors up to five times; if a file still holds a `Mangools 429`

@@ -4,7 +4,9 @@ Mangools API v3 client for the KW Research Pipeline skill.
 
 Bring-your-own-key: the customer's Mangools API key is read from the
 MANGOOLS_API_KEY environment variable, or passed with --apikey.
-Nothing is stored or transmitted anywhere except to api.mangools.com.
+Nothing is sent anywhere except api.mangools.com. To space requests across
+commands, the script keeps the time of the last request per quota pool in the
+temp folder (mangools-pace-<key hash>-<pool>, no key inside).
 
 Uses only the Python standard library so it runs in Claude's code-execution
 sandbox with no `pip install` required.
@@ -62,14 +64,35 @@ Language IDs:  en=1000  de=1001  fr=1002  es=1003  cs=1021  pl=1030  sk=1033
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
+import tempfile
+import time
 import unicodedata
 import urllib.parse
 import urllib.request
 
+try:
+    import fcntl  # POSIX only; on Windows parallel commands are not serialised
+except ImportError:
+    fcntl = None
+
 BASE = "https://api.mangools.com/v3"
+
+# The API allows 3 requests per 30 s per account and quota pool, and asks for
+# at least 11 s between requests. Counting from request starts still drew
+# 429s in a live test (3 of 12), so the script waits 11 s after the previous
+# request in the pool finished. The finish time is kept in a temp file, so
+# the spacing also holds between separate commands.
+PACE_SECONDS = 11
+POOLS = {"/serpchecker/serps": "serps",
+         "/kwfinder/related-keywords": "related-keywords",
+         "/kwfinder/suggested-keywords": "related-keywords",
+         "/kwfinder/keyword-imports": "related-keywords",
+         "/kwfinder/gap-analysis": "related-keywords"}
+_LAST = {}
 
 
 class _ApiError(Exception):
@@ -119,31 +142,85 @@ def _retry_after(text, header=None):
         return None
 
 
+def _pace_wait(path, key):
+    """Wait until PACE_SECONDS have passed since the last request in this pool
+    finished; return a token for _pace_mark (None for unpaced endpoints). The
+    pool's stamp file stays locked until _pace_mark, so a second command run
+    in parallel waits instead of firing at the same moment."""
+    pool = POOLS.get(path)
+    if not pool:
+        return None
+    tag = hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
+    f = None
+    try:
+        f = os.fdopen(os.open(os.path.join(tempfile.gettempdir(), f"mangools-pace-{tag}-{pool}"),
+                              os.O_RDWR | os.O_CREAT, 0o600), "r+")
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_EX)
+    except OSError:
+        if f:
+            f.close()
+        f = None
+    last = _LAST.get((tag, pool), 0.0)  # in-process copy: holds even if the file can't be used
+    try:
+        v = float(f.read().strip()) if f else 0.0
+        if math.isfinite(v):
+            last = max(last, v)
+    except (OSError, ValueError):
+        pass
+    wait = PACE_SECONDS - (time.time() - last)
+    if wait > 0:
+        time.sleep(min(wait, PACE_SECONDS))  # a stamp in the future (clock stepped back) waits one gap at most
+    return (tag, pool, f)
+
+
+def _pace_mark(token):
+    """Record that a request in this pool just finished, and release the lock."""
+    if not token:
+        return
+    tag, pool, f = token
+    now = time.time()
+    _LAST[(tag, pool)] = now
+    if f:
+        try:
+            f.seek(0)
+            f.truncate()
+            f.write(repr(now))
+            f.flush()
+        except OSError:
+            pass
+        finally:
+            f.close()
+
+
 def _request(method, path, key, query=None, body=None):
-    import time
     url = BASE + path
     if query:
         url += "?" + urllib.parse.urlencode(query)
     data = json.dumps(body).encode() if body is not None else None
-    headers = {"x-access-token": key, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (compatible; kw-research-pipeline/7.2)"}
+    headers = {"x-access-token": key, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (compatible; kw-research-pipeline/7.3)"}
 
     last_msg = "unknown error"
     # Mangools intermittently serves an anti-bot "Unathorized access" HTML page
     # even for valid keys. Retry a handful of times before giving up.
     for attempt in range(6):
+        token = _pace_wait(path, key)
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         retry_hdr = None
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                raw = resp.read().decode("utf-8", "replace")
-                status = resp.status
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    raw = resp.read().decode("utf-8", "replace")
+                    status = resp.status
+            finally:
+                _pace_mark(token)
         except urllib.error.HTTPError as e:
             raw = e.read().decode("utf-8", "replace")
             status = e.code
             retry_hdr = e.headers.get("Retry-After") if e.headers else None
         except Exception as e:  # network/DNS/timeout
             last_msg = f"Request failed: {e}"
-            wait = 1.5 * (attempt + 1)
+            wait = max(1.5 * (attempt + 1), PACE_SECONDS if path in POOLS else 0)
             _note(f"network error ({e}), retrying in {wait:g} s (attempt {attempt + 1}/6)")
             time.sleep(wait)
             continue
@@ -152,7 +229,7 @@ def _request(method, path, key, query=None, body=None):
         # Retry the transient anti-bot HTML page.
         if text.startswith("<") and "nathorized" in text:
             last_msg = "Mangools intermittent unauthorized HTML page"
-            wait = 1.5 * (attempt + 1)
+            wait = max(1.5 * (attempt + 1), PACE_SECONDS if path in POOLS else 0)
             _note(f"anti-bot page, retrying in {wait:g} s (attempt {attempt + 1}/6)")
             time.sleep(wait)
             continue
@@ -169,7 +246,7 @@ def _request(method, path, key, query=None, body=None):
         # Retry transient server-side failures (e.g. "No available SERP provider").
         if status >= 500 and attempt < 5:
             last_msg = f"Mangools {status}: {text[:200]}"
-            wait = min(_retry_after(text, retry_hdr) or 5 * (attempt + 1), 30)
+            wait = max(min(_retry_after(text, retry_hdr) or 5 * (attempt + 1), 30), PACE_SECONDS if path in POOLS else 0)
             _note(f"Mangools {status}, retrying in {wait} s (attempt {attempt + 1}/5)")
             time.sleep(wait)
             continue
@@ -225,6 +302,8 @@ def cmd_import_keywords(args):
         _die(f"{args.file} holds no keywords (one per line).")
     rows, before = [], None
     for i in range(0, len(kws), args.chunk):
+        if i:
+            time.sleep(30)  # keyword imports: at most 1 per 30 s
         body = {"keywords": kws[i:i + args.chunk], "location_id": int(args.location),
                 "language_id": int(args.language)}
         res = _request("POST", "/kwfinder/keyword-imports", key, body=body)
@@ -581,7 +660,6 @@ def cmd_suggest_cities(args):
 
 def cmd_serp_dual(args):
     import random
-    import time
     key = _key(args)
     code, country_id, _label = _resolve_country(key, args.country)
 
@@ -601,8 +679,6 @@ def cmd_serp_dual(args):
 
     country_serp = _request("GET", "/serpchecker/serps", key,
                             query={"kw": args.kw, "location_id": country_id})
-    # The API allows 3 requests per 30 s per pool and asks for 11 s between requests.
-    time.sleep(11)
     try:
         city_serp = _request("GET", "/serpchecker/serps", key,
                              query={"kw": args.kw, "location_id": city["id"]})
