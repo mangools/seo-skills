@@ -123,7 +123,7 @@ Skills you upload in Claude also load in Cowork and in Claude Code cloud session
 > unzip -o ~/Downloads/kw-research-pipeline.skill -d ~/.claude/skills/
 > ```
 >
-> `-o` replaces an older version without asking. If your browser saved the file somewhere else, change the path. Check that `~/.claude/skills/kw-research-pipeline/SKILL.md` exists, then restart Claude Code. You'll also need Python 3 and curl on your machine. Save `mangools.env` in `/tmp/kw-research` (see below). Claude writes the research files there too, outside any git repository, so they are never committed. Your computer may empty `/tmp` when it restarts, so copy the CSV and JSON files you want to keep.
+> `-o` replaces an older version without asking. If your browser saved the file somewhere else, change the path. Check that `~/.claude/skills/kw-research-pipeline/SKILL.md` exists, then restart Claude Code. You'll also need Python 3 on your machine. Save `mangools.env` in `/tmp/kw-research` (see below). Claude writes the research files there too, outside any git repository, so they are never committed. Your computer may empty `/tmp` when it restarts, so copy the CSV and JSON files you want to keep.
 
 ### 2. Save your API key as a file
 
@@ -270,7 +270,7 @@ The Mangools SEO skill is a Claude skill that runs a 9-step keyword research pip
 
 ### 2. Does Mangools SEO skill work in Claude Code?
 
-Yes, it does. In a local Claude Code session it works without any network setup; you only need Python 3 and curl on your machine. In Claude Code cloud sessions, Claude chat (web, desktop and mobile apps) and Cowork, the script runs in a sandbox, so `api.mangools.com` must first be added to the allowed domains. The Free Claude plan doesn't allow that, so there you can use the Mangools connector instead.
+Yes, it does. In a local Claude Code session it works without any network setup; you only need Python 3 on your machine. In Claude Code cloud sessions, Claude chat (web, desktop and mobile apps) and Cowork, the script runs in a sandbox, so `api.mangools.com` must first be added to the allowed domains. The Free Claude plan doesn't allow that, so there you can use the Mangools connector instead.
 
 ### 3. Do I need a paid Mangools account?
 

@@ -1,9 +1,9 @@
 ---
 name: "kw-research-pipeline"
-description: Run a complete 9-step SEO keyword-research pipeline for a seed keyword and domain — seed metrics, real organic competitors, long-tail discovery, competitor gap analysis, People-Also-Ask questions, topic + page-type clustering, traffic estimates, and a prioritised list of pages to create. Pulls live data from the Mangools API (KWFinder + SERPChecker) using the user's own Mangools key. Use this whenever the user wants keyword research, an SEO content plan, competitor keyword gaps, a topic/content map, "what pages should I build to rank for X", or mentions Mangools/KWFinder — even if they don't say "pipeline". Requires the Code Execution tool and a Mangools API key. Version 7.3.
+description: Run a complete 9-step SEO keyword-research pipeline for a seed keyword and domain — seed metrics, real organic competitors, long-tail discovery, competitor gap analysis, People-Also-Ask questions, topic + page-type clustering, traffic estimates, and a prioritised list of pages to create. Pulls live data from the Mangools API (KWFinder + SERPChecker) using the user's own Mangools key. Use this whenever the user wants keyword research, an SEO content plan, competitor keyword gaps, a topic/content map, "what pages should I build to rank for X", or mentions Mangools/KWFinder — even if they don't say "pipeline". Requires the Code Execution tool and a Mangools API key. Version 7.4.
 ---
 
-# KW Research Pipeline (v7.3)
+# KW Research Pipeline (v7.4)
 
 Turn one **seed keyword** + one **domain** into a prioritised SEO content plan,
 backed by live Mangools data. You (Claude) orchestrate nine steps: some pull
@@ -57,10 +57,10 @@ This file is the map; that file is the detail.
 ## Commands, files and how to read them
 
 The script `<skill-folder>/scripts/mangools.py` uses only the standard
-library. Commands: `related`, `serp` (one location), `serp-dual` (country +
-city; use it for every SERP check except the seed's national SERP in Step 1),
-`gap`, `import-keywords`, `domain-keywords`, `suggest-cities`, `locations`,
-`show` and `slug`. `--help` lists the flags.
+library. Commands: `limits`, `related`, `serp` (one location), `serp-dual`
+(country + city; use it for every SERP check except the seed's national SERP
+in Step 1), `gap`, `import-keywords`, `domain-keywords`, `suggest-cities`,
+`locations`, `show` and `slug`. `--help` lists the flags.
 
 Run every command from the sandbox's default working folder, never from
 inside the skill folder, and call the script by its full path. In Claude
@@ -123,8 +123,10 @@ export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-up
 - **The client picks the city at the end of Step 1**, after the full
   explanation (see Step 1). If they name a different city, look it up (free)
   and show the first 10 matches, cities first; take the `City` row with the
-  right region (Nashville, Tennessee, not Nashville, Arkansas), skip
-  `INACTIVE` rows, and if nothing matches retry with the city name alone. A
+  right region (Nashville, Tennessee, not Nashville, Arkansas), or the place's
+  own row when it has no `City` row (Brooklyn is a `Borough`, Westminster a
+  `Neighborhood`), skip `INACTIVE` rows, and if nothing matches retry with the
+  city name alone. A
   city must be inside the run's country; if the client names one abroad, say
   so and keep the run's country.
   ```bash
@@ -160,7 +162,7 @@ competitors, then Step 4; gap itself is national), then stop.
 ```bash
 python3 <skill-folder>/scripts/mangools.py slug --kw "<seed>"   # <run> = data/<printed slug>-<country-code>
 mkdir -p <run>
-export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; curl -s --retry 2 -H "x-access-token: $MANGOOLS_API_KEY" https://api.mangools.com/v3/kwfinder/limits > <run>/limits.json; python3 <skill-folder>/scripts/mangools.py show <run>/limits.json
+export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; python3 <skill-folder>/scripts/mangools.py limits > <run>/limits.json; python3 <skill-folder>/scripts/mangools.py show <run>/limits.json
 ```
 
 Tell the user what is left and what the run costs, in the two units `show`
@@ -278,9 +280,9 @@ wording to the niche, but keep all its parts: what happens (results differ by lo
 and change often), why it matters (customers search from real cities, the
 national results alone can point to the wrong competitors), what they get
 (both result sets side by side, a more reliable competitor list), what it
-costs (each ranking check runs once more for the city; add the figure at
-the Step 0 rate, 2 extra SERP units per check on paid plans or 1 on the
-welcome bonus; same city for the whole run, asked once), the numbered cities or the request
+costs (each ranking check runs once more for the city, 2 extra SERP units on
+paid plans, 1 on the welcome bonus; same city for the whole run, asked
+once), the numbered cities or the request
 to name one, and that they can name their own. Never ask it without the explanation, never through
 a tappable-options tool (the explanation gets lost), and wait for the answer
 before Step 2; keep the three IDs to map the answer ("2", "Houston").
@@ -443,8 +445,8 @@ title, 3–5 target keywords from the real data, summed volume, estimated
 monthly traffic (28.7% × volume), average KD, a competitor example URL, and a
 one-sentence strategic rationale. Score and rank each page **70% estimated
 traffic + 30% ease of ranking** (see the reference for the exact normalised
-formula), sort by score, and present as a ranked roadmap. Finish with ~12
-adjacent seed keywords to research next.
+formula), sort by score, and present as a ranked roadmap. Finish with up to
+12 adjacent seed keywords to research next, picked by §8's rule.
 
 ## Output principles
 

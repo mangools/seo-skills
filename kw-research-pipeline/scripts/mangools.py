@@ -13,6 +13,8 @@ sandbox with no `pip install` required.
 
 Commands
 --------
+  limits     Remaining quota, welcome bonus and plan caps (free lookup)
+             python mangools.py limits
   related    Related keywords + metrics (KWFinder)
              python mangools.py related --kw "uptime monitoring" --location 2840 --language 1000
   serp       Live SERP results for a keyword (SERPChecker)
@@ -50,7 +52,7 @@ Commands
              is not JSON, or was cut off. Detects the file type itself.
              python mangools.py show data/<run>/related-<slug>.json [--rows 40]
   slug       Print the file-name slug of a keyword (no API call): lowercase,
-             accent marks removed, letters of every script kept.
+             letters of every script kept as typed.
              python mangools.py slug --kw "Gartenmöbel Lounge"
 
 All commands except show and slug print JSON to stdout. On error they print
@@ -73,6 +75,7 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
+from http import HTTPStatus
 
 try:
     import fcntl  # POSIX only; on Windows parallel commands are not serialised
@@ -97,6 +100,10 @@ _LAST = {}
 
 class _ApiError(Exception):
     """A Mangools call that failed for good; main() prints it as {"error": ...}."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def _key(args):
@@ -198,7 +205,7 @@ def _request(method, path, key, query=None, body=None):
     if query:
         url += "?" + urllib.parse.urlencode(query)
     data = json.dumps(body).encode() if body is not None else None
-    headers = {"x-access-token": key, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (compatible; kw-research-pipeline/7.3)"}
+    headers = {"x-access-token": key, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (compatible; kw-research-pipeline/7.4)"}
 
     last_msg = "unknown error"
     # Mangools intermittently serves an anti-bot "Unathorized access" HTML page
@@ -269,7 +276,7 @@ def _request(method, path, key, query=None, body=None):
                 msg += ": " + (detail or (j.get("error") if isinstance(j.get("error"), str) else "") or json.dumps(j)[:300])
             except Exception:
                 msg += ": " + (text[:300] or "non-JSON response")
-            raise _ApiError(msg)
+            raise _ApiError(msg, status)
 
         try:
             return json.loads(text)
@@ -277,6 +284,11 @@ def _request(method, path, key, query=None, body=None):
             raise _ApiError(f"Could not parse Mangools response: {text[:300]}")
 
     raise _ApiError(f"Gave up after retries: {last_msg}")
+
+
+def cmd_limits(args):
+    key = _key(args)
+    print(json.dumps(_request("GET", "/kwfinder/limits", key)))
 
 
 def cmd_related(args):
@@ -395,6 +407,15 @@ def _resolve_city(key, name, country):
     return None
 
 
+def _location_by_id(key, location_id):
+    try:
+        return _request("GET", f"/kwfinder/locations/{location_id}", key)
+    except _ApiError as e:
+        if e.status == HTTPStatus.NOT_FOUND:
+            return None
+        raise
+
+
 def _resolve_country(key, arg):
     """Return (code, location_id, label) for a built-in code, any country's
     location ID, or a country name looked up via the locations endpoint."""
@@ -406,7 +427,7 @@ def _resolve_country(key, arg):
         if lid == low:
             return code, lid, COUNTRY_NAMES[code]
     if low.isdigit():
-        row = _request("GET", f"/kwfinder/locations/{low}", key)
+        row = _location_by_id(key, low)
         if not isinstance(row, dict) or row.get("target_type") != "Country":
             _die(f"Location {arg} is not a country. Use a country's location ID "
                  f"(locations --query \"<country>\", the Country row).")
@@ -629,8 +650,9 @@ def _city_explainer(country_code, cities, kw=None, country_label=None):
         f"{country}, and once for one city. You'll see both side by side, so we can tell "
         f"whether your competition is the same everywhere or changes by location. That makes "
         f"the competitor list, and everything built on it, more reliable.\n\n"
-        f"The cost: each ranking check runs once more for the city, so it uses twice the SERP units. We'll "
-        f"keep the same city for the whole research, so I'll only ask this once.\n\n"
+        f"The cost: each ranking check runs once more for the city, which takes 2 extra SERP units on paid "
+        f"Mangools plans, or 1 while your welcome bonus lasts. We'll keep the same city for the whole "
+        f"research, so I'll only ask this once.\n\n"
         f"Which city should we use?\n\n{options}\n\n"
         + ("" if not cities else
            "If another city matters more to your business, for example where most of your "
@@ -658,6 +680,20 @@ def cmd_suggest_cities(args):
                       "client_message": _city_explainer(code, picks, args.kw, label)}))
 
 
+def _require_place_inside_country(key, city_id, code):
+    hint = f"Pass the run's city ID from suggest-cities or locations --query \"<city>\" --country {code}."
+    row = _location_by_id(key, city_id)
+    if row is None:
+        _die(f"--city-id {city_id} is not a known Mangools location. {hint}")
+    row = row if isinstance(row, dict) else {}
+    inside_country = (row.get("country_code") or "").lower() == code
+    if inside_country and row.get("target_type") != "Country":
+        return
+    label = row.get("canonical_name") or f"location {city_id}"
+    _die(f"--city-id {city_id} is {label} ({row.get('target_type')}, {row.get('country_code')}), "
+         f"not a place inside '{code}'. {hint}")
+
+
 def cmd_serp_dual(args):
     import random
     key = _key(args)
@@ -666,6 +702,7 @@ def cmd_serp_dual(args):
     # Resolve the city: explicit ID > explicit name > random from the pool.
     city = None
     if args.city_id:
+        _require_place_inside_country(key, args.city_id, code)
         city = {"id": int(args.city_id), "label": args.city_label or f"location {args.city_id}"}
     else:
         names = [args.city] if args.city else random.sample(CITY_POOL.get(code, []), len(CITY_POOL.get(code, [])))
@@ -747,6 +784,9 @@ def main():
 
     p = argparse.ArgumentParser(description="Mangools v3 client (BYOK)")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    lm = sub.add_parser("limits", parents=[common], help="Remaining quota and plan caps (free)")
+    lm.set_defaults(func=cmd_limits)
 
     r = sub.add_parser("related", parents=[common], help="Related keywords + metrics")
     r.add_argument("--kw", required=True)

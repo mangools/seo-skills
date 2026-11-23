@@ -36,7 +36,7 @@ The script writes the API body as-is; there is no `data` wrapper.
 
 `locations` output: a list of `id`, `label`, `type` (`City`, `Country`, ...), `country` and `active`.
 
-Quota file (`<run>/limits.json`, the Step 0 curl response): `highestPlan` and `resources`, where `resources.related-keywords` and `resources.serps` each carry `remaining` and `limit` (the daily figures); `kw-gap-max-competitors` (competitors one `gap` call takes), `related-keywords-rows` and `competitor-keywords-rows` (rows per lookup); and, for Free and Free+ accounts, `permanent_credits`, the one-time API & MCP welcome bonus, whose `related-keywords` and `serps` each carry `limit` and `remaining`. Mangools spends the bonus before the daily limits, at 1 per request (a gap page included). `show` prints all of these in plain words.
+Quota file (`<run>/limits.json`, the Step 0 `limits` output): `highestPlan` and `resources`, where `resources.related-keywords` and `resources.serps` each carry `remaining` and `limit` (the daily figures); `kw-gap-max-competitors` (competitors one `gap` call takes), `related-keywords-rows` and `competitor-keywords-rows` (rows per lookup); and, for Free and Free+ accounts, `permanent_credits`, the one-time API & MCP welcome bonus, whose `related-keywords` and `serps` each carry `limit` and `remaining`. Mangools spends the bonus before the daily limits, at 1 per request (a gap page included). `show` prints all of these in plain words.
 
 `import-keywords` output: `keywords[]` (keyword objects for the imported phrases, `sv` null when Mangools has no figure), `countKeywordsBeforeLimit`, `language`, `location` and `imported` (how many phrases were sent). `show` prints the rows and how many have volume. One call covers up to 100 phrases for 2 keyword lookups (1 on the welcome bonus).
 
@@ -240,6 +240,9 @@ trafficScore = (page_est_traffic / max_est_traffic_across_pages) * 100
 kdScore      = (avg_kd != null) ? (100 - avg_kd) : 50   # null KD -> neutral 50
 score        = round(0.7 * trafficScore + 0.3 * kdScore)
 ```
+`avg_kd` is the mean KD (§9's `Keyword Difficulty`) of the page's target
+keywords that have one; keywords without a KD are left out of the mean, so
+`avg_kd` is null only when none of them has a KD.
 Compute `est_traffic` for a page as 28.7% × (sum of its target-keyword volumes),
 using the real per-keyword volumes — not model estimates. Sort pages by score
 descending; keep the top 12, deduped by topic. A keyword without volume data
@@ -249,14 +252,26 @@ at all is not a page, fold its questions into the FAQ section of the closest
 page and do not count it among the 12. List those questions in the page's
 `FAQ Questions` column (§9).
 
+### Adjacent seeds (Step 9)
+Take them from the run's saved files, never from memory: keywords with
+volume that do not contain the seed, pass the profile test (§2) and are not
+in the Step 6 pool. Take them from the Step 1 `related` file first, sorted by
+volume: it is the seed's own neighbourhood. Fill from the Step 4 gap files
+only when fewer than 12 qualify there; gap files hold the competitors' whole
+sites, so their top volumes are generic head terms. Close variants of one
+search ("keyword rank checker", "keyword ranking checker tool") count as one
+seed; list one phrasing. List fewer than 12 when fewer qualify.
+
 ---
 
 ## 9. Export formats (Step 7)
 
-Write real files to disk and hand them to the user. Write both CSVs as UTF-8
-with a byte-order mark (Python: `open(path, "w", newline="",
-encoding="utf-8-sig")`), so Excel shows accented and non-Latin keywords
-correctly when the file is opened with a double-click.
+Write real files to disk and hand them to the user. Write both CSVs with
+Python's `csv.writer` as UTF-8 with a byte-order mark
+(`csv.writer(open(path, "w", newline="", encoding="utf-8-sig"))`), so Excel
+shows accented and non-Latin keywords correctly when the file is opened with
+a double-click, and a comma, quote or line break inside a field never shifts
+the columns. Never join or quote fields by hand.
 
 ### Keywords CSV (deduped by keyword)
 Columns:
@@ -284,13 +299,23 @@ separated by `;`; the JSON bundle carries them as `faq[]` per page.
 ```json
 {
   "seed": "...",
-  "competitors": [...],
-  "clusters": [...],
-  "keywords": [...],
-  "pageRecommendations": [...]
+  "competitors": [{"domain": "...", "class": "direct", "seen_in": "both",
+                   "best_pos": 1, "urls": ["..."]}],
+  "clusters": [{"name": "...", "keyword_count": 0, "volume_sum": 0}],
+  "keywords": [{"kw": "...", "topic": "...", "page_type": "blog_post",
+                "sv": 0, "kd": 0, "best_traffic": 0, "avg_traffic": 0,
+                "serp_status": "validated", "competitor_urls": ["..."]}],
+  "pageRecommendations": [{"rank": 1, "title": "...", "page_type": "blog_post",
+                           "cluster": "...", "est_monthly_traffic": 0,
+                           "volume_sum": 0, "avg_kd": 0, "priority_score": 0,
+                           "target_keywords": ["..."],
+                           "competitor_example": "...", "rationale": "...",
+                           "faq": ["..."]}]
 }
 ```
-Quote fields containing commas and escape embedded quotes by doubling them.
+Fields mirror the CSV columns: `kd` is `Keyword Difficulty`, `class` one of
+§2's classes, `seen_in` `country`, `city` or `both`, and `best_pos` the best
+organic `pos` (§1). A value without data is `null`, never left out.
 Name files `keywords-<slug>-<YYYY-MM-DD>.csv`,
 `page-recommendations-<slug>-<YYYY-MM-DD>.csv` and
 `research-<slug>-<YYYY-MM-DD>.json`, where `<slug>` is the seed's slug from
