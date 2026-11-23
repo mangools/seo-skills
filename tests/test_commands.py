@@ -15,6 +15,10 @@ NASHVILLE_TENNESSEE = {"_id": 9002, "canonical_name": "Nashville,Tennessee,Unite
                        "target_type": "City", "country_code": "US", "active": True}
 BROOKLYN = {"_id": 1022762, "canonical_name": "Brooklyn,New York,United States",
             "target_type": "Borough", "country_code": "US", "active": True}
+BOLTON = {"_id": 1018126, "name": "Bolton", "canonical_name": "Bolton, Massachusetts, United States",
+          "target_type": "City", "country_code": "US", "active": True}
+INACTIVE_CITY = {"_id": 9003, "name": "Springfield", "canonical_name": "Springfield, Ohio, United States",
+                 "target_type": "City", "country_code": "US", "active": False}
 UNKNOWN_LOCATION_ID = 999999
 EMPTY_NOT_FOUND = (404, "")
 
@@ -60,6 +64,45 @@ class SerpDualTest(unittest.TestCase):
                               SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
         self.assertEqual(run.exit_code, 0, run.stdout)
         self.assertEqual(run.api.location_ids(SERPS), ["2840", str(BROOKLYN["_id"])])
+
+    def test_rejects_a_city_id_whose_place_is_not_the_city_label_before_any_serp(self):
+        # A mistyped ID usually lands on a neighbouring place in the same country:
+        # 1018126 is Bolton, MA, next to Boston's 1018127.
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(BOLTON["_id"]),
+                      "--city-label", "Boston, Massachusetts, United States",
+                      routes={f"/kwfinder/locations/{BOLTON['_id']}": [(200, BOLTON)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn(BOLTON["canonical_name"], json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
+
+    def test_accepts_the_city_label_in_any_case_and_with_or_without_the_region(self):
+        for label in ("Boston", "boston, MA", "Boston,Massachusetts,United States",
+                      "Boston, Massachusetts, United States"):
+            with self.subTest(label):
+                run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us",
+                              "--city-id", str(BOSTON["_id"]), "--city-label", label,
+                              routes={f"/kwfinder/locations/{BOSTON['_id']}": [(200, BOSTON)],
+                                      SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+                self.assertEqual(run.exit_code, 0, run.stdout)
+                self.assertEqual(json.loads(run.stdout)["city"]["label"], label)
+
+    def test_city_label_matches_without_accents_and_keeps_other_scripts(self):
+        self.assertEqual(mangools._fold("Zürich "), mangools._fold("ZURICH"))
+        self.assertNotEqual(mangools._fold("Київ"), mangools._fold("Львів"))
+
+    def test_without_a_city_label_the_output_names_the_place_of_the_id(self):
+        run = serp_dual_for_boston()
+        self.assertEqual(run.exit_code, 0, run.stdout)
+        self.assertEqual(json.loads(run.stdout)["city"]["label"], BOSTON["canonical_name"])
+
+    def test_rejects_an_inactive_location_before_any_serp(self):
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(INACTIVE_CITY["_id"]),
+                      routes={f"/kwfinder/locations/{INACTIVE_CITY['_id']}": [(200, INACTIVE_CITY)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn("inactive", json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
 
     def test_unknown_city_id_is_named_unknown_before_any_serp(self):
         run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(UNKNOWN_LOCATION_ID),

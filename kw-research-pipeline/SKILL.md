@@ -133,7 +133,10 @@ export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-up
   export MANGOOLS_API_KEY="$(python3 <skill-folder>/scripts/loadkey.py <path-to-uploaded-mangools.env>)"; python3 <skill-folder>/scripts/mangools.py locations --query "<city>" --country <code> > <run>/locations.json; python3 <skill-folder>/scripts/mangools.py show <run>/locations.json --rows 10
   ```
 - **Reuse that city for the whole run**: every `serp-dual` passes the same
-  `--city-id`. Don't ask again.
+  `--city-id` and, as `--city-label`, that row's `label`. Don't ask again.
+  `serp-dual` checks the ID first (free): if it is another place than the
+  label names, or an inactive one, it stops before spending any SERP unit;
+  copy the ID and the label from that row again.
 - **Report the comparison** from the `comparison` block (`shared_domains`,
   `country_only`, `city_only`, `overlap_pct`; definition in §1). Below ~50%
   overlap, say that the two audiences see different results and what differs.

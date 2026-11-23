@@ -23,7 +23,9 @@ Commands
              python mangools.py gap --domain you.com --competitors a.com,b.com --location 2840 --page 1
   serp-dual  Country SERP + SERP for one city in that country, with overlap stats.
              --country takes a built-in code (us gb au ca de fr), any country's
-             location ID (e.g. 2724) or its name (e.g. Spain). Pass --city-id.
+             location ID (e.g. 2724) or its name (e.g. Spain). Pass --city-id and
+             its --city-label; an ID of another place or an inactive one is
+             refused before any SERP is fetched.
              python mangools.py serp-dual --kw "uptime monitoring" --country us --city-id 1018127
              python mangools.py serp-dual --kw "herramientas seo" --country Spain --city-id 1005493
   suggest-cities  Offer N random major cities in a country, each resolved to its
@@ -680,18 +682,34 @@ def cmd_suggest_cities(args):
                       "client_message": _city_explainer(code, picks, args.kw, label)}))
 
 
-def _require_place_inside_country(key, city_id, code):
+def _fold(name):
+    """Place name compared without case and accents ("Zürich" matches "zurich")."""
+    decomposed = unicodedata.normalize("NFKD", name)
+    return " ".join("".join(c for c in decomposed if not unicodedata.combining(c)).casefold().split())
+
+
+def _require_place_inside_country(key, city_id, code, city_label=None):
+    """Return the label of --city-id after checking that it is an active place
+    inside `code` and, with --city-label, the place that label names. A mistyped
+    ID usually lands on a neighbouring place in the same country (1018126 is
+    Bolton, MA, next to Boston's 1018127), so the name catches it before any
+    SERP unit is spent."""
     hint = f"Pass the run's city ID from suggest-cities or locations --query \"<city>\" --country {code}."
     row = _location_by_id(key, city_id)
     if row is None:
         _die(f"--city-id {city_id} is not a known Mangools location. {hint}")
     row = row if isinstance(row, dict) else {}
-    inside_country = (row.get("country_code") or "").lower() == code
-    if inside_country and row.get("target_type") != "Country":
-        return
     label = row.get("canonical_name") or f"location {city_id}"
-    _die(f"--city-id {city_id} is {label} ({row.get('target_type')}, {row.get('country_code')}), "
-         f"not a place inside '{code}'. {hint}")
+    inside_country = (row.get("country_code") or "").lower() == code
+    if not inside_country or row.get("target_type") == "Country":
+        _die(f"--city-id {city_id} is {label} ({row.get('target_type')}, {row.get('country_code')}), "
+             f"not a place inside '{code}'. {hint}")
+    if row.get("active") is False:
+        _die(f"--city-id {city_id} is {label}, an inactive location. {hint}")
+    names = {_fold(n) for n in (row.get("name"), (row.get("canonical_name") or "").split(",")[0]) if n}
+    if city_label and names and _fold(city_label.split(",")[0]) not in names:
+        _die(f"--city-id {city_id} is {label}, not {city_label} (--city-label). {hint}")
+    return label
 
 
 def cmd_serp_dual(args):
@@ -702,8 +720,8 @@ def cmd_serp_dual(args):
     # Resolve the city: explicit ID > explicit name > random from the pool.
     city = None
     if args.city_id:
-        _require_place_inside_country(key, args.city_id, code)
-        city = {"id": int(args.city_id), "label": args.city_label or f"location {args.city_id}"}
+        label = _require_place_inside_country(key, args.city_id, code, args.city_label)
+        city = {"id": int(args.city_id), "label": args.city_label or label}
     else:
         names = [args.city] if args.city else random.sample(CITY_POOL.get(code, []), len(CITY_POOL.get(code, [])))
         for name in names:
@@ -824,7 +842,8 @@ def main():
     d.add_argument("--country", default="us", help="built-in code (us gb au ca de fr), any country's location ID, or its name")
     d.add_argument("--city", help="City name to use instead of a random one")
     d.add_argument("--city-id", type=int, help="Exact city location ID (reuse the run's city)")
-    d.add_argument("--city-label", help="Label for --city-id (display only)")
+    d.add_argument("--city-label", help="Label of --city-id from suggest-cities or locations; an ID whose "
+                                        "place has another name is refused (default: the place's label)")
     d.set_defaults(func=cmd_serp_dual)
 
     sc = sub.add_parser("suggest-cities", parents=[common],
