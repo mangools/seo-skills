@@ -38,6 +38,19 @@ class VersionCheckTest(unittest.TestCase):
                 self.assertIn(path, problems[0])
 
 
+class KeyFileTest(unittest.TestCase):
+    def test_finds_key_files_anywhere_in_the_skill_folder(self):
+        paths = ["kw-research-pipeline/SKILL.md", "kw-research-pipeline/mangools.env",
+                 "kw-research-pipeline/scripts/.env", "kw-research-pipeline/MANGOOLS.ENV",
+                 "kw-research-pipeline/references/environment.md"]
+        self.assertEqual(package.key_files(paths), paths[1:4])
+
+    def test_git_ignores_a_key_file_saved_in_the_skill_folder(self):
+        result = subprocess.run(["git", "check-ignore", "-q", "--no-index", "kw-research-pipeline/mangools.env"],
+                                cwd=REPO, check=False)
+        self.assertEqual(result.returncode, 0)
+
+
 class BuildTest(unittest.TestCase):
     def test_archive_holds_exactly_the_tracked_skill_files(self):
         with tempfile.TemporaryDirectory() as out:

@@ -1,2 +1,4 @@
 __pycache__/
 dist/
+# API key files such as mangools.env: never commit them, the repository is public
+*.env
