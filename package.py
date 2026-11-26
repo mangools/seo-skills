@@ -100,7 +100,7 @@ def build(out_dir, ref="HEAD"):
     version, problems = version_problems(texts)
     if problems:
         sys.exit("version mismatch, nothing built:\n  " + "\n  ".join(problems))
-    stamp = time.gmtime(int(_git("log", "-1", "--format=%ct", ref).decode()))[:6]
+    stamp = time.gmtime(int(_git("log", "-1", "--no-show-signature", "--format=%ct", ref).decode()))[:6]
     out_dir.mkdir(parents=True, exist_ok=True)
     archive_path = out_dir / f"{SKILL_NAME}.skill"
     with zipfile.ZipFile(archive_path, "w") as archive:

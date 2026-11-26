@@ -7,7 +7,6 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest import mock
 
 from support import REPO, load_module
 
@@ -152,15 +151,28 @@ class BuildTest(unittest.TestCase):
             self.assertEqual({entry.date_time for entry in archive.infolist()}, {(2026, 1, 2, 3, 4, 6)})
         self.assertEqual(archives[0], archives[1])
 
-    def test_refuses_to_build_when_a_key_file_is_tracked(self):
-        files = [name for name in SHIPPED_ENTRIES if not name.endswith("/")]
-        committed = {**dict.fromkeys(files, b"text"), "kw-research-pipeline/mangools.env": b"text"}
-        with tempfile.TemporaryDirectory() as out, \
-                mock.patch.object(package, "committed_skill_files", return_value=committed):
-            with self.assertRaises(SystemExit) as exit_:
-                package.build(Path(out))
-            self.assertIn("kw-research-pipeline/mangools.env", str(exit_.exception.code))
-            self.assertFalse((Path(out) / "kw-research-pipeline.skill").exists())
+    def test_refuses_to_build_when_a_key_file_is_committed(self):
+        repo, env = self.repository()
+        (repo / "kw-research-pipeline" / "mangools.env").write_text("MANGOOLS_API_KEY=test-key\n")
+        self.git(repo, env, "add", "-f", "kw-research-pipeline/mangools.env")
+        self.git(repo, env, "commit", "-q", "-m", "key file")
+        result = build(repo, repo.parent / "out", env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("kw-research-pipeline/mangools.env", result.stderr)
+        self.assertFalse((repo.parent / "out" / "kw-research-pipeline.skill").exists())
+
+    def test_ref_builds_that_commit_and_not_head(self):
+        repo, env = self.repository()
+        skill_md = repo / "kw-research-pipeline" / "SKILL.md"
+        tagged = skill_md.read_bytes()
+        self.git(repo, env, "tag", "v7.4")
+        skill_md.write_bytes(tagged + b"\nAn edit committed after the tag.\n")
+        self.git(repo, env, "commit", "-q", "-am", "after the tag")
+        result = subprocess.run([sys.executable, "-B", str(repo / "package.py"), "--out", str(repo.parent / "out"),
+                                 "--ref", "v7.4"], capture_output=True, text=True, check=False, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with zipfile.ZipFile(repo.parent / "out" / "kw-research-pipeline.skill") as archive:
+            self.assertEqual(archive.read("kw-research-pipeline/SKILL.md"), tagged)
 
     def test_refuses_a_key_in_the_commit_that_the_working_tree_no_longer_has(self):
         repo, env = self.repository()
