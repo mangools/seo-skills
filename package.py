@@ -70,11 +70,12 @@ def committed_skill_files(ref):
 KEY_VALUE = re.compile(rb"(?i)MANGOOLS_API_KEY\s*=\s*['\"]?[0-9a-f]{64}\b")
 
 
-def key_files(names):
-    """Skill files named like a key file (mangools.env, .env) or holding a Mangools API key."""
+def key_files(files):
+    """Paths in `files` ({path: committed bytes}) named like a key file (mangools.env,
+    .env) or holding a Mangools API key."""
     # Dropping NUL bytes lets the pattern match a UTF-16 file, which loadkey.py also reads.
-    return [name for name in names if name.lower().endswith(".env")
-            or KEY_VALUE.search((REPO / name).read_bytes().replace(b"\0", b""))]
+    return [path for path, content in files.items() if path.lower().endswith(".env")
+            or KEY_VALUE.search(content.replace(b"\0", b""))]
 
 
 def _entries(paths):

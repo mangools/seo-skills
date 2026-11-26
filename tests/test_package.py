@@ -62,20 +62,11 @@ DUMMY_KEY = "0123456789abcdef" * 4
 
 
 class KeyFileTest(unittest.TestCase):
-    def key_files_in(self, files):
-        """key_files over `files` ({path: bytes}) written to a throwaway checkout."""
-        with tempfile.TemporaryDirectory() as root:
-            for name, content in files.items():
-                (Path(root) / name).parent.mkdir(parents=True, exist_ok=True)
-                (Path(root) / name).write_bytes(content)
-            with mock.patch.object(package, "REPO", Path(root)):
-                return package.key_files(list(files))
-
     def test_finds_key_files_anywhere_in_the_skill_folder(self):
         paths = ["kw-research-pipeline/SKILL.md", "kw-research-pipeline/mangools.env",
                  "kw-research-pipeline/scripts/.env", "kw-research-pipeline/MANGOOLS.ENV",
                  "kw-research-pipeline/references/environment.md"]
-        self.assertEqual(self.key_files_in(dict.fromkeys(paths, b"text")), paths[1:4])
+        self.assertEqual(package.key_files(dict.fromkeys(paths, b"text")), paths[1:4])
 
     def test_finds_a_key_by_its_content_under_any_file_name(self):
         files = {
@@ -86,7 +77,7 @@ class KeyFileTest(unittest.TestCase):
             "kw-research-pipeline/SKILL.md": b"Save MANGOOLS_API_KEY=<your key> as mangools.env\n",
             "kw-research-pipeline/hash.md": f"sha256 {DUMMY_KEY}\n".encode(),
         }
-        self.assertEqual(self.key_files_in(files), list(files)[:3])
+        self.assertEqual(package.key_files(files), list(files)[:3])
 
     def test_git_ignores_a_key_file_saved_in_the_skill_folder(self):
         for name in ("mangools.env", "mangools.env.txt", ".env", ".env.local"):
@@ -115,50 +106,73 @@ class BuildTest(unittest.TestCase):
                                                    cwd=REPO, capture_output=True, check=True).stdout
                         self.assertEqual(archive.read(entry), committed)
 
+    def repository(self):
+        """A throwaway repository holding a consistent skill as its one commit, isolated from the
+        developer's git config (hooks, signing, autocrlf). Returns it and the env for git and package.py."""
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        tmp = Path(tmp_dir.name)
+        (tmp / "gitconfig").write_text("")
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": str(tmp / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1",
+               "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+               "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+               # An even second, because zip stores time in two-second steps.
+               "GIT_COMMITTER_DATE": "2026-01-02T03:04:06Z"}
+        repo, skill = tmp / "repo", tmp / "repo" / "kw-research-pipeline"
+        (skill / "scripts").mkdir(parents=True)
+        shutil.copy(REPO / "package.py", repo)
+        for path, text in CONSISTENT.items():
+            (skill / path).write_bytes(text.encode())
+        self.git(repo, env, "init", "-q")
+        self.git(repo, env, "add", "-A")
+        self.git(repo, env, "commit", "-q", "-m", "skill")
+        return repo, env
+
+    @staticmethod
+    def git(repo, env, *args):
+        subprocess.run(["git", *args], cwd=repo, env=env, capture_output=True, check=True)
+
     def test_ships_the_commit_not_the_working_tree_and_rebuilds_it_byte_for_byte(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            (tmp / "gitconfig").write_text("")
-            # A throwaway repository, isolated from the developer's git config (hooks, signing, autocrlf).
-            env = {**os.environ, "GIT_CONFIG_GLOBAL": str(tmp / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1",
-                   "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
-                   "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
-            repo, skill = tmp / "repo", tmp / "repo" / "kw-research-pipeline"
-            (skill / "scripts").mkdir(parents=True)
-            shutil.copy(REPO / "package.py", repo)
-            for path, text in CONSISTENT.items():
-                (skill / path).write_bytes(text.encode())
+        repo, env = self.repository()
+        skill = repo / "kw-research-pipeline"
+        committed = (skill / "SKILL.md").read_bytes()
+        # What a Windows checkout with core.autocrlf looks like, plus an edit nobody committed.
+        self.git(repo, env, "config", "core.autocrlf", "true")
+        (skill / "SKILL.md").write_bytes(committed.replace(b"\n", b"\r\n") + b"uncommitted edit\r\n")
 
-            def git(*args):
-                subprocess.run(["git", *args], cwd=repo, env=env, capture_output=True, check=True)
-
-            git("init", "-q")
-            git("add", "-A")
-            git("commit", "-q", "-m", "skill")
-            committed = (skill / "SKILL.md").read_bytes()
-            # What a Windows checkout with core.autocrlf looks like, plus an edit nobody committed.
-            git("config", "core.autocrlf", "true")
-            (skill / "SKILL.md").write_bytes(committed.replace(b"\n", b"\r\n") + b"uncommitted edit\r\n")
-
-            archives = []
-            for out in ("first", "second"):
-                result = build(repo, tmp / out, env)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                archives.append((tmp / out / "kw-research-pipeline.skill").read_bytes())
-            self.assertIn("uncommitted changes are not in the archive", result.stderr)
-            with zipfile.ZipFile(io.BytesIO(archives[0])) as archive:
-                self.assertEqual(archive.read("kw-research-pipeline/SKILL.md"), committed)
-            self.assertEqual(archives[0], archives[1])
+        archives = []
+        for out in ("first", "second"):
+            result = build(repo, repo.parent / out, env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            archives.append((repo.parent / out / "kw-research-pipeline.skill").read_bytes())
+        self.assertIn("uncommitted changes are not in the archive", result.stderr)
+        with zipfile.ZipFile(io.BytesIO(archives[0])) as archive:
+            self.assertEqual(archive.read("kw-research-pipeline/SKILL.md"), committed)
+            # The commit's time, not the time of the build, so a later build gives the same bytes.
+            self.assertEqual({entry.date_time for entry in archive.infolist()}, {(2026, 1, 2, 3, 4, 6)})
+        self.assertEqual(archives[0], archives[1])
 
     def test_refuses_to_build_when_a_key_file_is_tracked(self):
-        tracked = [*SHIPPED_FILES, "kw-research-pipeline/mangools.env"]
+        files = [name for name in SHIPPED_ENTRIES if not name.endswith("/")]
+        committed = {**dict.fromkeys(files, b"text"), "kw-research-pipeline/mangools.env": b"text"}
         with tempfile.TemporaryDirectory() as out, \
-                mock.patch.object(package, "_tracked_skill_files", return_value=tracked):
+                mock.patch.object(package, "committed_skill_files", return_value=committed):
             with self.assertRaises(SystemExit) as exit_:
                 package.build(Path(out))
             self.assertIn("kw-research-pipeline/mangools.env", str(exit_.exception.code))
             self.assertFalse((Path(out) / "kw-research-pipeline.skill").exists())
 
+    def test_refuses_a_key_in_the_commit_that_the_working_tree_no_longer_has(self):
+        repo, env = self.repository()
+        notes = repo / "kw-research-pipeline" / "notes.txt"
+        notes.write_text(f"MANGOOLS_API_KEY={DUMMY_KEY}\n")
+        self.git(repo, env, "add", "-A")
+        self.git(repo, env, "commit", "-q", "-m", "notes")
+        notes.write_text("no key here\n")
+        result = build(repo, repo.parent / "out", env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("kw-research-pipeline/notes.txt", result.stderr)
+        self.assertFalse((repo.parent / "out" / "kw-research-pipeline.skill").exists())
 
 if __name__ == "__main__":
     unittest.main()
