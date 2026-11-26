@@ -707,8 +707,12 @@ def _require_place_inside_country(key, city_id, code, city_label=None):
     if row.get("active") is False:
         _die(f"--city-id {city_id} is {label}, an inactive location. {hint}")
     names = {_fold(n) for n in (row.get("name"), (row.get("canonical_name") or "").split(",")[0]) if n}
-    if city_label and names and _fold(city_label.split(",")[0]) not in names:
-        _die(f"--city-id {city_id} is {label}, not {city_label} (--city-label). {hint}")
+    if city_label and names:
+        first, *regions = [_fold(part) for part in city_label.split(",")]
+        place = ",".join(_fold(part) for part in (row.get("canonical_name") or "").split(","))
+        # The region tells same-named places apart (Nashville, Tennessee and Nashville, Arkansas), as in _resolve_city.
+        if first not in names or any(region not in place for region in regions if region):
+            _die(f"--city-id {city_id} is {label}, not {city_label} (--city-label). {hint}")
     return label
 
 

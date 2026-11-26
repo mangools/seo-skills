@@ -76,6 +76,16 @@ class SerpDualTest(unittest.TestCase):
         self.assertIn(BOLTON["canonical_name"], json.loads(run.stdout)["error"])
         self.assertNotIn(SERPS, run.api.paths())
 
+    def test_rejects_a_city_id_of_a_same_named_place_in_another_region_before_any_serp(self):
+        # locations --query lists both Nashvilles side by side, so the neighbouring row's ID is an easy slip.
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(NASHVILLE_ARKANSAS["_id"]),
+                      "--city-label", NASHVILLE_TENNESSEE["canonical_name"],
+                      routes={f"/kwfinder/locations/{NASHVILLE_ARKANSAS['_id']}": [(200, NASHVILLE_ARKANSAS)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn(NASHVILLE_ARKANSAS["canonical_name"], json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
+
     def test_accepts_the_city_label_in_any_case_and_with_or_without_the_region(self):
         for label in ("Boston", "boston, MA", "Boston,Massachusetts,United States",
                       "Boston, Massachusetts, United States"):
