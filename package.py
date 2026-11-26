@@ -52,8 +52,9 @@ def build(out_dir):
     names = _tracked_skill_files()
     leaked = key_files(names)
     if leaked:
-        sys.exit("API key in the skill folder, nothing built. Untrack a key file with git rm --cached, "
-                 "or remove the key from a skill file, and if it was ever pushed, replace that key:\n  "
+        sys.exit("API key in the skill folder, nothing built. Take it out of every commit not yet pushed "
+                 "(git rm --cached for a key file, or delete the key from a skill file, then amend or rewrite "
+                 "those commits). If a commit holding it was ever pushed, replace the key in Mangools:\n  "
                  + "\n  ".join(leaked))
     skill_dir = REPO / SKILL_NAME
     texts = {path: (skill_dir / path).read_text(encoding="utf-8") for path in VERSION_PATTERNS}
