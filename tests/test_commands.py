@@ -86,6 +86,27 @@ class SerpDualTest(unittest.TestCase):
         self.assertIn(NASHVILLE_ARKANSAS["canonical_name"], json.loads(run.stdout)["error"])
         self.assertNotIn(SERPS, run.api.paths())
 
+    def test_rejects_a_state_named_like_the_city_of_the_label(self):
+        # locations --query lists the State row before the City row of the same name.
+        new_york_state = {"_id": 21167, "name": "New York", "canonical_name": "New York, United States",
+                          "target_type": "State", "country_code": "US", "active": True}
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", "21167",
+                      "--city-label", "New York, New York, United States",
+                      routes={"/kwfinder/locations/21167": [(200, new_york_state)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn("New York, United States", json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
+
+    def test_accepts_new_york_city_under_its_own_label(self):
+        new_york_city = {"_id": 1023191, "name": "New York", "canonical_name": "New York, New York, United States",
+                         "target_type": "City", "country_code": "US", "active": True}
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", "1023191",
+                      "--city-label", "New York, New York, United States",
+                      routes={"/kwfinder/locations/1023191": [(200, new_york_city)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 0, run.stdout)
+
     def test_rejects_a_spelled_out_region_that_is_only_part_of_another_region_name(self):
         # "Virginia" is inside "West Virginia" as text, but names another state.
         charleston_wv = {"_id": 9004, "canonical_name": "Charleston,West Virginia,United States",

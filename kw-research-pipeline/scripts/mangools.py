@@ -709,7 +709,9 @@ def _require_place_inside_country(key, city_id, code, city_label=None):
     names = {_fold(n) for n in (row.get("name"), (row.get("canonical_name") or "").split(",")[0]) if n}
     if city_label and names:
         first, *regions = [_fold(part) for part in city_label.split(",")]
-        place = {_fold(part) for part in (row.get("canonical_name") or "").split(",")}
+        # The canonical name's parts after the place's own name, so a state named like its city
+        # (New York, United States) does not pass the city's label.
+        place = {_fold(part) for part in (row.get("canonical_name") or "").split(",")[1:]}
         # A spelled-out region tells same-named places apart (Nashville, Tennessee and Nashville,
         # Arkansas); a code such as MA, TX or USA cannot be checked against the name and is skipped.
         if first not in names or any(region not in place for region in regions if len(region) > 3):
