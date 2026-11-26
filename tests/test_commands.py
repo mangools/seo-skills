@@ -86,9 +86,20 @@ class SerpDualTest(unittest.TestCase):
         self.assertIn(NASHVILLE_ARKANSAS["canonical_name"], json.loads(run.stdout)["error"])
         self.assertNotIn(SERPS, run.api.paths())
 
+    def test_rejects_a_spelled_out_region_that_is_only_part_of_another_region_name(self):
+        # "Virginia" is inside "West Virginia" as text, but names another state.
+        charleston_wv = {"_id": 9004, "canonical_name": "Charleston,West Virginia,United States",
+                         "target_type": "City", "country_code": "US", "active": True}
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", "9004",
+                      "--city-label", "Charleston, Virginia",
+                      routes={"/kwfinder/locations/9004": [(200, charleston_wv)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertNotIn(SERPS, run.api.paths())
+
     def test_accepts_the_city_label_in_any_case_and_with_or_without_the_region(self):
-        for label in ("Boston", "boston, MA", "Boston,Massachusetts,United States",
-                      "Boston, Massachusetts, United States"):
+        for label in ("Boston", "boston, MA", "Boston, MA, USA", "Boston, United States",
+                      "Boston,Massachusetts,United States", "Boston, Massachusetts, United States"):
             with self.subTest(label):
                 run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us",
                               "--city-id", str(BOSTON["_id"]), "--city-label", label,
