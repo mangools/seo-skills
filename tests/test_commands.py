@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest import mock
 
 from support import BOSTON, LIMITS_PAID, mangools, run_cli, serp_response
 
@@ -85,6 +86,19 @@ class SerpDualTest(unittest.TestCase):
         self.assertEqual(run.exit_code, 1, run.stdout)
         self.assertIn(NASHVILLE_ARKANSAS["canonical_name"], json.loads(run.stdout)["error"])
         self.assertNotIn(SERPS, run.api.paths())
+
+    def test_checks_a_short_spelled_out_region_and_skips_a_code_in_capitals(self):
+        # Two rows named Yokkaichi exist in Japan: the city in Mie and a neighbourhood in Oita.
+        oita = {"_id": 9207985, "name": "Yokkaichi", "canonical_name": "Yokkaichi, Oita, Japan",
+                "target_type": "Neighborhood", "country_code": "JP", "active": True}
+        mie = {**oita, "_id": 1009492, "canonical_name": "Yokkaichi, Mie, Japan", "target_type": "City"}
+        with mock.patch.object(mangools, "_location_by_id", return_value=oita), \
+                mock.patch("sys.stdout"), self.assertRaises(SystemExit):
+            mangools._require_place_inside_country("key", 9207985, "jp", "Yokkaichi, Mie, Japan")
+        for label in ("Yokkaichi, Mie, Japan", "Yokkaichi, JP"):
+            with self.subTest(label), mock.patch.object(mangools, "_location_by_id", return_value=mie):
+                self.assertEqual(mangools._require_place_inside_country("key", 1009492, "jp", label),
+                                 mie["canonical_name"])
 
     def test_rejects_a_state_named_like_the_city_of_the_label(self):
         # locations --query lists the State row before the City row of the same name.
