@@ -91,8 +91,10 @@ def build(out_dir, ref="HEAD"):
     files = committed_skill_files(ref)
     leaked = key_files(files)
     if leaked:
-        sys.exit("API key file in the skill folder, nothing built. Untrack it with git rm --cached "
-                 "and, if it was ever pushed, replace that key:\n  " + "\n  ".join(leaked))
+        sys.exit("API key in the skill folder, nothing built. Take it out of every commit not yet pushed "
+                 "(git rm --cached for a key file, or delete the key from a skill file, then amend or rewrite "
+                 "those commits). If a commit holding it was ever pushed, replace the key in Mangools:\n  "
+                 + "\n  ".join(leaked))
     texts = {path: files[f"{SKILL_NAME}/{path}"].decode("utf-8")
              for path, _where in VERSION_PATTERNS if f"{SKILL_NAME}/{path}" in files}
     version, problems = version_problems(texts)
