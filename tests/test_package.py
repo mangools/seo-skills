@@ -167,12 +167,14 @@ class BuildTest(unittest.TestCase):
         tagged = skill_md.read_bytes()
         self.git(repo, env, "tag", "v7.4")
         skill_md.write_bytes(tagged + b"\nAn edit committed after the tag.\n")
-        self.git(repo, env, "commit", "-q", "-am", "after the tag")
+        self.git(repo, {**env, "GIT_COMMITTER_DATE": "2026-03-04T05:06:08Z"}, "commit", "-q", "-am", "after the tag")
         result = subprocess.run([sys.executable, "-B", str(repo / "package.py"), "--out", str(repo.parent / "out"),
                                  "--ref", "v7.4"], capture_output=True, text=True, check=False, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         with zipfile.ZipFile(repo.parent / "out" / "kw-research-pipeline.skill") as archive:
             self.assertEqual(archive.read("kw-research-pipeline/SKILL.md"), tagged)
+            # The tagged commit's time, not the time of HEAD.
+            self.assertEqual({entry.date_time for entry in archive.infolist()}, {(2026, 1, 2, 3, 4, 6)})
 
     def test_refuses_a_key_in_the_commit_that_the_working_tree_no_longer_has(self):
         repo, env = self.repository()
