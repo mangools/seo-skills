@@ -37,9 +37,15 @@ def _tracked_skill_files():
     return [name for name in listing.split("\0") if name]
 
 
-def key_files(paths):
-    """Paths named like an API key file (mangools.env, .env)."""
-    return [path for path in paths if path.lower().endswith(".env")]
+# Every Mangools API key is 64 lowercase hex characters; loadkey.py reads the name in any case.
+KEY_VALUE = re.compile(rb"(?i)MANGOOLS_API_KEY\s*=\s*['\"]?[0-9a-f]{64}\b")
+
+
+def key_files(names):
+    """Skill files named like a key file (mangools.env, .env) or holding a Mangools API key."""
+    # Dropping NUL bytes lets the pattern match a UTF-16 file, which loadkey.py also reads.
+    return [name for name in names if name.lower().endswith(".env")
+            or KEY_VALUE.search((REPO / name).read_bytes().replace(b"\0", b""))]
 
 
 def build(out_dir):
