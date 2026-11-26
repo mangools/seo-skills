@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest import mock
 
 from support import BOSTON, LIMITS_PAID, mangools, run_cli, serp_response
 
@@ -15,6 +16,10 @@ NASHVILLE_TENNESSEE = {"_id": 9002, "canonical_name": "Nashville,Tennessee,Unite
                        "target_type": "City", "country_code": "US", "active": True}
 BROOKLYN = {"_id": 1022762, "canonical_name": "Brooklyn,New York,United States",
             "target_type": "Borough", "country_code": "US", "active": True}
+BOLTON = {"_id": 1018126, "name": "Bolton", "canonical_name": "Bolton, Massachusetts, United States",
+          "target_type": "City", "country_code": "US", "active": True}
+INACTIVE_CITY = {"_id": 9003, "name": "Springfield", "canonical_name": "Springfield, Ohio, United States",
+                 "target_type": "City", "country_code": "US", "active": False}
 UNKNOWN_LOCATION_ID = 999999
 EMPTY_NOT_FOUND = (404, "")
 
@@ -60,6 +65,100 @@ class SerpDualTest(unittest.TestCase):
                               SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
         self.assertEqual(run.exit_code, 0, run.stdout)
         self.assertEqual(run.api.location_ids(SERPS), ["2840", str(BROOKLYN["_id"])])
+
+    def test_rejects_a_city_id_whose_place_is_not_the_city_label_before_any_serp(self):
+        # A mistyped ID usually lands on a neighbouring place in the same country:
+        # 1018126 is Bolton, MA, next to Boston's 1018127.
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(BOLTON["_id"]),
+                      "--city-label", "Boston, Massachusetts, United States",
+                      routes={f"/kwfinder/locations/{BOLTON['_id']}": [(200, BOLTON)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn(BOLTON["canonical_name"], json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
+
+    def test_rejects_a_city_id_of_a_same_named_place_in_another_region_before_any_serp(self):
+        # locations --query lists both Nashvilles side by side, so the neighbouring row's ID is an easy slip.
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(NASHVILLE_ARKANSAS["_id"]),
+                      "--city-label", NASHVILLE_TENNESSEE["canonical_name"],
+                      routes={f"/kwfinder/locations/{NASHVILLE_ARKANSAS['_id']}": [(200, NASHVILLE_ARKANSAS)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn(NASHVILLE_ARKANSAS["canonical_name"], json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
+
+    def test_checks_a_short_spelled_out_region_and_skips_a_code_in_capitals(self):
+        # Two rows named Yokkaichi exist in Japan: the city in Mie and a neighbourhood in Oita.
+        oita = {"_id": 9207985, "name": "Yokkaichi", "canonical_name": "Yokkaichi, Oita, Japan",
+                "target_type": "Neighborhood", "country_code": "JP", "active": True}
+        mie = {**oita, "_id": 1009492, "canonical_name": "Yokkaichi, Mie, Japan", "target_type": "City"}
+        with mock.patch.object(mangools, "_location_by_id", return_value=oita), \
+                mock.patch("sys.stdout"), self.assertRaises(SystemExit):
+            mangools._require_place_inside_country("key", 9207985, "jp", "Yokkaichi, Mie, Japan")
+        for label in ("Yokkaichi, Mie, Japan", "Yokkaichi, JP"):
+            with self.subTest(label), mock.patch.object(mangools, "_location_by_id", return_value=mie):
+                self.assertEqual(mangools._require_place_inside_country("key", 1009492, "jp", label),
+                                 mie["canonical_name"])
+
+    def test_rejects_a_state_named_like_the_city_of_the_label(self):
+        # locations --query lists the State row before the City row of the same name.
+        new_york_state = {"_id": 21167, "name": "New York", "canonical_name": "New York, United States",
+                          "target_type": "State", "country_code": "US", "active": True}
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", "21167",
+                      "--city-label", "New York, New York, United States",
+                      routes={"/kwfinder/locations/21167": [(200, new_york_state)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn("New York, United States", json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
+
+    def test_accepts_new_york_city_under_its_own_label(self):
+        new_york_city = {"_id": 1023191, "name": "New York", "canonical_name": "New York, New York, United States",
+                         "target_type": "City", "country_code": "US", "active": True}
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", "1023191",
+                      "--city-label", "New York, New York, United States",
+                      routes={"/kwfinder/locations/1023191": [(200, new_york_city)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 0, run.stdout)
+
+    def test_rejects_a_spelled_out_region_that_is_only_part_of_another_region_name(self):
+        # "Virginia" is inside "West Virginia" as text, but names another state.
+        charleston_wv = {"_id": 9004, "canonical_name": "Charleston,West Virginia,United States",
+                         "target_type": "City", "country_code": "US", "active": True}
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", "9004",
+                      "--city-label", "Charleston, Virginia",
+                      routes={"/kwfinder/locations/9004": [(200, charleston_wv)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertNotIn(SERPS, run.api.paths())
+
+    def test_accepts_the_city_label_in_any_case_and_with_or_without_the_region(self):
+        for label in ("Boston", "boston, MA", "Boston, MA, USA", "Boston, United States",
+                      "Boston,Massachusetts,United States", "Boston, Massachusetts, United States"):
+            with self.subTest(label):
+                run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us",
+                              "--city-id", str(BOSTON["_id"]), "--city-label", label,
+                              routes={f"/kwfinder/locations/{BOSTON['_id']}": [(200, BOSTON)],
+                                      SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+                self.assertEqual(run.exit_code, 0, run.stdout)
+                self.assertEqual(json.loads(run.stdout)["city"]["label"], label)
+
+    def test_city_label_matches_without_accents_and_keeps_other_scripts(self):
+        self.assertEqual(mangools._fold("Zürich "), mangools._fold("ZURICH"))
+        self.assertNotEqual(mangools._fold("Київ"), mangools._fold("Львів"))
+
+    def test_without_a_city_label_the_output_names_the_place_of_the_id(self):
+        run = serp_dual_for_boston()
+        self.assertEqual(run.exit_code, 0, run.stdout)
+        self.assertEqual(json.loads(run.stdout)["city"]["label"], BOSTON["canonical_name"])
+
+    def test_rejects_an_inactive_location_before_any_serp(self):
+        run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(INACTIVE_CITY["_id"]),
+                      routes={f"/kwfinder/locations/{INACTIVE_CITY['_id']}": [(200, INACTIVE_CITY)],
+                              SERPS: dual_serps(["alpha.test"], ["alpha.test"])})
+        self.assertEqual(run.exit_code, 1, run.stdout)
+        self.assertIn("inactive", json.loads(run.stdout)["error"])
+        self.assertNotIn(SERPS, run.api.paths())
 
     def test_unknown_city_id_is_named_unknown_before_any_serp(self):
         run = run_cli("serp-dual", "--kw", "seo tools", "--country", "us", "--city-id", str(UNKNOWN_LOCATION_ID),
